@@ -370,6 +370,7 @@ void init_dl_rq(struct dl_rq *dl_rq)
 
 	dl_rq->running_bw = 0;
 	dl_rq->this_bw = 0;
+	dl_rq->max_bw = to_ratio(global_rt_period(), global_rt_runtime());
 	init_dl_rq_bw_ratio(dl_rq);
 }
 
@@ -2550,6 +2551,7 @@ int sched_dl_overflow(struct task_struct *p, int policy,
 		      const struct sched_attr *attr)
 {
 	struct dl_bw *dl_b = dl_bw_of(task_cpu(p));
+	struct dl_rq *dl_rq = dl_rq_of_se(&p->dl);
 	u64 period = attr->sched_period ?: attr->sched_deadline;
 	u64 runtime = attr->sched_runtime;
 	u64 new_bw = dl_policy(policy) ? to_ratio(period, runtime) : 0;
@@ -2570,13 +2572,13 @@ int sched_dl_overflow(struct task_struct *p, int policy,
 	raw_spin_lock(&dl_b->lock);
 	cpus = dl_bw_cpus(task_cpu(p));
 	if (dl_policy(policy) && !task_has_dl_policy(p) &&
-	    !__dl_overflow(dl_b, cpus, 0, new_bw)) {
+	    !__dl_overflow(dl_rq, 0, new_bw)) {
 		if (hrtimer_active(&p->dl.inactive_timer))
 			__dl_sub(dl_b, p->dl.dl_bw, cpus);
 		__dl_add(dl_b, new_bw, cpus);
 		err = 0;
 	} else if (dl_policy(policy) && task_has_dl_policy(p) &&
-		   !__dl_overflow(dl_b, cpus, p->dl.dl_bw, new_bw)) {
+		   !__dl_overflow(dl_rq, p->dl.dl_bw, new_bw)) {
 		/*
 		 * XXX this is slightly incorrect: when the task
 		 * utilization decreases, we should delay the total
@@ -2717,6 +2719,7 @@ int dl_task_can_attach(struct task_struct *p, const struct cpumask *cs_cpus_allo
 	bool overflow;
 	int cpus, ret;
 	unsigned long flags;
+	struct dl_rq *dl_rq = dl_rq_of_se(&p->dl);
 
 	dest_cpu = cpumask_any_and(cpu_active_mask, cs_cpus_allowed);
 
@@ -2724,7 +2727,7 @@ int dl_task_can_attach(struct task_struct *p, const struct cpumask *cs_cpus_allo
 	dl_b = dl_bw_of(dest_cpu);
 	raw_spin_lock_irqsave(&dl_b->lock, flags);
 	cpus = dl_bw_cpus(dest_cpu);
-	overflow = __dl_overflow(dl_b, cpus, 0, p->dl.dl_bw);
+	overflow = __dl_overflow(dl_rq, 0, p->dl.dl_bw);
 	if (overflow) {
 		ret = -EBUSY;
 	} else {
@@ -2771,11 +2774,13 @@ bool dl_cpu_busy(unsigned int cpu)
 	bool overflow;
 	int cpus;
 
+	struct dl_rq *dl_rq = &cpu_rq(cpu)->dl;
+
 	rcu_read_lock_sched();
 	dl_b = dl_bw_of(cpu);
 	raw_spin_lock_irqsave(&dl_b->lock, flags);
 	cpus = dl_bw_cpus(cpu);
-	overflow = __dl_overflow(dl_b, cpus, 0, 0);
+	overflow = __dl_overflow(dl_rq, 0, 0);
 	raw_spin_unlock_irqrestore(&dl_b->lock, flags);
 	rcu_read_unlock_sched();
 

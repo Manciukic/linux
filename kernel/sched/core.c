@@ -4928,8 +4928,10 @@ change:
 			 * the entire root_domain to become SCHED_DEADLINE. We
 			 * will also fail if there's no bandwidth available.
 			 */
-			if (!cpumask_subset(span, p->cpus_ptr) ||
-			    rq->rd->dl_bw.bw == 0) {
+			if (!cpumask_subset(p->cpus_ptr, span) ||
+			    rq->rd->dl_bw.bw == 0 ||
+			    cpumask_weight(p->cpus_ptr) > 1) {
+				printk_deferred(KERN_WARNING "cpumask does not contain only 1 CPU or CPU is not a subset of the root_domain.");
 				retval = -EPERM;
 				goto unlock;
 			}
@@ -5445,13 +5447,13 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	 */
 #ifdef CONFIG_SMP
 	if (task_has_dl_policy(p) && dl_bandwidth_enabled()) {
-		rcu_read_lock();
-		if (!cpumask_subset(task_rq(p)->rd->span, new_mask)) {
+		if (!cpumask_subset(new_mask, task_rq(p)->rd->span) ||
+			cpumask_weight(new_mask) > 1 ||
+			dl_task_can_attach(p, new_mask)) {
 			retval = -EBUSY;
 			rcu_read_unlock();
 			goto out_free_new_mask;
 		}
-		rcu_read_unlock();
 	}
 #endif
 again:
