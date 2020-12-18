@@ -1638,6 +1638,7 @@ static void yield_task_dl(struct rq *rq)
 #ifdef CONFIG_SMP
 
 static int find_later_rq(struct task_struct *task);
+static int find_first_fit_rq(struct task_struct *task);
 
 static int
 select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags)
@@ -1645,6 +1646,7 @@ select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags)
 	struct task_struct *curr;
 	bool select_rq;
 	struct rq *rq;
+	int target_cpu;
 
 	if (sd_flag != SD_BALANCE_WAKE)
 		goto out;
@@ -1666,7 +1668,8 @@ select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags)
 	select_rq = unlikely(dl_task(curr)) &&
 		    (curr->nr_cpus_allowed < 2 ||
 		     !dl_entity_preempt(&p->dl, &curr->dl)) &&
-		    p->nr_cpus_allowed > 1;
+		    p->nr_cpus_allowed > 1 &&
+		    rq->dl.this_bw > BW_UNIT;
 
 	/*
 	 * Take the capacity of the CPU into account to
@@ -1676,13 +1679,17 @@ select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags)
 		select_rq |= !dl_task_fits_capacity(p, cpu);
 
 	if (select_rq) {
-		int target = find_later_rq(p);
-
-		if (target != -1 &&
-				(dl_time_before(p->dl.deadline,
-					cpu_rq(target)->dl.earliest_dl.curr) ||
-				(cpu_rq(target)->dl.dl_nr_running == 0)))
-			cpu = target;
+		target_cpu = find_first_fit_rq(p);
+		if (target_cpu != -1){
+			cpu = target_cpu;
+		} else {
+			target_cpu = find_later_rq(p);
+			if (target_cpu != -1 &&
+					(dl_time_before(p->dl.deadline,
+						cpu_rq(target_cpu)->dl.earliest_dl.curr) ||
+					(cpu_rq(target_cpu)->dl.dl_nr_running == 0)))
+				cpu = target_cpu;
+		}
 	}
 	rcu_read_unlock();
 
@@ -2066,6 +2073,65 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 	return later_rq;
 }
 
+static int find_first_fit_rq(struct task_struct *task){
+	int i;
+	struct rq *other_rq;
+
+	for_each_cpu(i, task->cpus_ptr){
+		other_rq = cpu_rq(i);
+
+		if (task->dl.dl_bw + other_rq->dl.this_bw <= BW_UNIT){
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+/* Locks the rq it finds */
+static struct rq *find_lock_first_fit_rq(struct task_struct *task, struct rq *rq)
+{
+	struct rq *other_rq = NULL;
+	int tries;
+	int cpu;
+
+	for (tries = 0; tries < DL_MAX_TRIES; tries++) {
+		cpu = find_first_fit_rq(task);
+
+		if ((cpu == -1) || (cpu == rq->cpu))
+			break;
+
+		other_rq = cpu_rq(cpu);
+
+		/* Retry if something changed. */
+		if (double_lock_balance(rq, other_rq)) {
+			if (unlikely(task_rq(task) != rq ||
+				     !cpumask_test_cpu(other_rq->cpu, task->cpus_ptr) ||
+				     task_running(rq, task) ||
+				     !dl_task(task) ||
+				     !task_on_rq_queued(task))) {
+				double_unlock_balance(rq, other_rq);
+				other_rq = NULL;
+				break;
+			}
+		}
+
+		/*
+		 * If the rq we found has no -deadline task, or
+		 * it has enough bw available, the rq is a good one.
+		 */
+		if (!other_rq->dl.dl_nr_running ||
+		    	task->dl.dl_bw + other_rq->dl.this_bw <= BW_UNIT)
+			break;
+
+		/* Otherwise we try again. */
+		double_unlock_balance(rq, other_rq);
+		other_rq = NULL;
+	}
+
+	return other_rq;
+}
+
 static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
 {
 	struct task_struct *p;
@@ -2094,11 +2160,16 @@ static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
 static int push_dl_task(struct rq *rq)
 {
 	struct task_struct *next_task;
-	struct rq *later_rq;
+	struct rq *target_rq;
 	int ret = 0;
 
 	if (!rq->dl.overloaded)
 		return 0;
+
+	// Stay on current CPU if schedulable
+	if (rq->dl.this_bw <= BW_UNIT){
+		return 0;
+	}
 
 	next_task = pick_next_pushable_dl_task(rq);
 	if (!next_task)
@@ -2124,45 +2195,52 @@ retry:
 	get_task_struct(next_task);
 
 	/* Will lock the rq it'll find */
-	later_rq = find_lock_later_rq(next_task, rq);
-	if (!later_rq) {
-		struct task_struct *task;
+	target_rq = find_lock_first_fit_rq(next_task, rq);
 
-		/*
-		 * We must check all this again, since
-		 * find_lock_later_rq releases rq->lock and it is
-		 * then possible that next_task has migrated.
-		 */
-		task = pick_next_pushable_dl_task(rq);
-		if (task == next_task) {
+	if (!target_rq){
+		/* Will lock the rq it'll find */
+		target_rq = find_lock_later_rq(next_task, rq);
+		if (!target_rq) {
+			struct task_struct *task;
+
 			/*
-			 * The task is still there. We don't try
-			 * again, some other CPU will pull it when ready.
-			 */
-			goto out;
+			* We must check all this again, since
+			* find_lock_later_rq releases rq->lock and it is
+			* then possible that next_task has migrated.
+			*/
+			task = pick_next_pushable_dl_task(rq);
+			if (task == next_task) {
+				/*
+				* The task is still there. We don't try
+				* again, some other CPU will pull it when ready.
+				*/
+				goto out;
+			}
+
+			if (!task)
+				/* No more tasks */
+				goto out;
+
+			put_task_struct(next_task);
+			next_task = task;
+			goto retry;
 		}
-
-		if (!task)
-			/* No more tasks */
-			goto out;
-
-		put_task_struct(next_task);
-		next_task = task;
-		goto retry;
 	}
 
 	deactivate_task(rq, next_task, 0);
-	set_task_cpu(next_task, later_rq->cpu);
+	set_task_cpu(next_task, target_rq->cpu);
 
 	/*
 	 * Update the later_rq clock here, because the clock is used
 	 * by the cpufreq_update_util() inside __add_running_bw().
 	 */
-	update_rq_clock(later_rq);
-	activate_task(later_rq, next_task, ENQUEUE_NOCLOCK);
+	update_rq_clock(target_rq);
+	activate_task(target_rq, next_task, ENQUEUE_NOCLOCK);
 	ret = 1;
 
-	resched_curr(later_rq);
+	resched_curr(target_rq);
+
+	double_unlock_balance(rq, target_rq);
 
 	double_unlock_balance(rq, later_rq);
 
@@ -2187,7 +2265,7 @@ static void pull_dl_task(struct rq *this_rq)
 	struct rq *src_rq;
 	u64 dmin = LONG_MAX;
 
-	if (likely(!dl_overloaded(this_rq)))
+	if (likely(!dl_overloaded(this_rq)) || this_rq->dl.dl_nr_running > 0)
 		return;
 
 	/*
@@ -2201,6 +2279,9 @@ static void pull_dl_task(struct rq *this_rq)
 			continue;
 
 		src_rq = cpu_rq(cpu);
+
+		if (src_rq->dl.this_bw <= BW_UNIT)
+			continue;
 
 		/*
 		 * It looks racy, abd it is! However, as in sched_rt.c,
