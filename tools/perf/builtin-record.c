@@ -2058,6 +2058,7 @@ static int record__start_threads(struct record *rec)
 	pr_debug("threads[%d]: started on cpu=%d\n", thread->tid, sched_getcpu());
 
 out_err:
+	pthread_attr_destroy(&attrs);
 	if (sigprocmask(SIG_SETMASK, &mask, NULL)) {
 		pr_err("Failed to unblock signals on threads start: %s\n", strerror(errno));
 		ret = -1;
