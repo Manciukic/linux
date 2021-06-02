@@ -242,6 +242,8 @@ static int record__aio_enabled(struct record *rec);
 static int record__comp_enabled(struct record *rec);
 static size_t zstd_compress(struct zstd_data *data,
 			    void *dst, size_t dst_size, void *src, size_t src_size);
+static size_t zstd_compress_session(struct perf_session *session,
+			    void *dst, size_t dst_size, void *src, size_t src_size);
 
 #ifdef HAVE_AIO_SUPPORT
 static int record__aio_write(struct aiocb *cblock, int trace_fd,
@@ -375,13 +377,9 @@ static int record__aio_pushfn(struct mmap *map, void *to, void *buf, size_t size
 	 */
 
 	if (record__comp_enabled(aio->rec)) {
-		struct zstd_data *zstd_data = &aio->rec->session->zstd_data;
-
-		aio->rec->session->bytes_transferred += size;
-		size = zstd_compress(zstd_data,
+		size = zstd_compress_session(aio->rec->session,
 				     aio->data + aio->size, mmap__mmap_len(map) - aio->size,
 				     buf, size);
-		aio->rec->session->bytes_compressed += size;
 	} else {
 		memcpy(aio->data + aio->size, buf, size);
 	}
@@ -1374,6 +1372,21 @@ static size_t zstd_compress(struct zstd_data *zstd_data, void *dst, size_t dst_s
 
 	compressed = zstd_compress_stream_to_records(zstd_data, dst, dst_size, src, src_size,
 						     max_record_size, process_comp_header);
+
+	return compressed;
+}
+
+
+static size_t zstd_compress_session(struct perf_session *session, void *dst, size_t dst_size,
+			    void *src, size_t src_size)
+{
+	struct zstd_data *zstd_data = &session->zstd_data;
+	size_t compressed;
+
+	compressed = zstd_compress(zstd_data, dst, dst_size, src, src_size);
+
+	session->bytes_transferred += src_size;
+	session->bytes_compressed  += compressed;
 
 	return compressed;
 }
