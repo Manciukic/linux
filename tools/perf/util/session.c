@@ -2242,6 +2242,12 @@ reader__init(struct reader *rd, bool *one_mmap)
 	return 0;
 }
 
+static void
+reader__fini(struct reader *rd)
+{
+	zstd_fini(&rd->zstd_data);
+}
+
 static int
 reader__mmap(struct reader *rd, struct perf_session *session)
 {
@@ -2367,6 +2373,8 @@ static int __perf_session__process_events(struct perf_session *session)
 		.in_place_update = session->data->in_place_update,
 	};
 
+	// TODO check data_size != 0 ?
+
 	ui_progress__init_size(&prog, rd->data_size, "Processing events...");
 
 	err = reader__init(rd, &session->one_mmap);
@@ -2396,6 +2404,8 @@ static int __perf_session__process_events(struct perf_session *session)
 				break;
 		}
 	}
+
+	reader__fini(rd);
 
 	/* do the final flush for ordered samples */
 	err = ordered_events__flush(oe, OE_FLUSH__FINAL);
@@ -2520,6 +2530,9 @@ static int __perf_session__process_dir_events(struct perf_session *session)
 			i = (i + 1) % session->nr_readers;
 		}
 	}
+
+	for (i = 0; i < session->nr_readers; i++) 
+		reader__fini(&rd[i]);
 
 	ret = ordered_events__flush(&session->ordered_events, OE_FLUSH__FINAL);
 	if (ret)
