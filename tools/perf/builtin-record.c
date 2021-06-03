@@ -3503,8 +3503,12 @@ static int record__init_thread_user_masks(struct record *rec, struct perf_cpu_ma
 			goto out_free_all_specs;
 		}
 		mask = strtok_r(NULL, "/", &mask_ptr);
-		if (mask == NULL)
-			break;
+		if (mask == NULL){
+			pr_err("Invalid thread mask spec: %s\n", spec);
+			free(maps_spec[nr_spec]);
+			ret = -1;
+			goto out_free_all_specs;
+		}
 		pr_debug("  affinity mask: %s\n", mask);
 		prev_spec = affinity_spec;
 		affinity_spec = realloc(affinity_spec, (nr_spec + 1) * sizeof(char *));
