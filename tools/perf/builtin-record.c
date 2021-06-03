@@ -2524,11 +2524,11 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 
 out_child:
 	record__stop_threads(rec, &waking);
-out_free_threads:
-	evlist__finalize_ctlfd(rec->evlist);
 	record__mmap_read_all(rec, true);
-	record__aio_mmap_read_sync(rec);
+out_free_threads:
 	record__free_thread_data(rec);
+	evlist__finalize_ctlfd(rec->evlist);
+	record__aio_mmap_read_sync(rec);
 
 	if (!quiet)
 		fprintf(stderr, "[ perf record: Woken up %ld times to write data ]\n", waking);
