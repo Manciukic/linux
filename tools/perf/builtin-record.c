@@ -3393,8 +3393,14 @@ static int record__init_thread_masks_spec(struct record *rec, struct perf_cpu_ma
 			goto out_free_full_mask;
 	}
 
-	rec->nr_threads = nr_threads;
-	pr_debug("threads: nr_threads=%d\n", rec->nr_threads);
+	if (nr_threads == 0) {
+		pr_err("The cpu spec provided to thread is invalid\n");
+		ret = -1;
+	} else {
+		rec->nr_threads = nr_threads;
+		pr_debug("threads: nr_threads=%d\n", rec->nr_threads);
+	}
+
 
 out_free_full_mask:
 	record__thread_mask_free(&full_mask);
