@@ -3292,17 +3292,17 @@ static void record__mmap_cpu_mask_init_spec(struct mmap_cpu_mask *mask, char *ma
 	}
 }
 
-static int record__alloc_thread_masks(struct record *rec, int nr_threads, int nr_bits)
+static int record__alloc_thread_masks(struct record *rec, int nr_bits)
 {
 	int t, ret;
 
-	rec->thread_masks = zalloc(nr_threads * sizeof(*(rec->thread_masks)));
+	rec->thread_masks = zalloc(rec->nr_threads * sizeof(*(rec->thread_masks)));
 	if (!rec->thread_masks) {
 		pr_err("Failed to allocate thread masks\n");
 		return -ENOMEM;
 	}
 
-	for (t = 0; t < nr_threads; t++) {
+	for (t = 0; t < rec->nr_threads; t++) {
 		ret = record__thread_mask_alloc(&rec->thread_masks[t], nr_bits);
 		if (ret)
 			return ret;
@@ -3316,11 +3316,12 @@ static int record__init_thread_cpu_masks(struct record *rec, struct perf_cpu_map
 {
 	int t, ret, nr_cpus = perf_cpu_map__nr(cpus);
 
-	ret = record__alloc_thread_masks(rec, nr_cpus, cpu__max_cpu());
+	rec->nr_threads = nr_cpus;
+
+	ret = record__alloc_thread_masks(rec, cpu__max_cpu());
 	if (ret)
 		return ret;
 
-	rec->nr_threads = nr_cpus;
 	pr_debug("threads: nr_threads=%d\n", rec->nr_threads);
 
 	for (t = 0; t < rec->nr_threads; t++) {
@@ -3548,13 +3549,13 @@ static int record__init_thread_default_masks(struct record *rec, struct perf_cpu
 {
 	int ret;
 
-	ret = record__alloc_thread_masks(rec, 1, cpu__max_cpu());
+	rec->nr_threads = 1;
+
+	ret = record__alloc_thread_masks(rec, cpu__max_cpu());
 	if (ret)
 		return ret;
 
 	record__mmap_cpu_mask_init(&rec->thread_masks->maps, cpus);
-
-	rec->nr_threads = 1;
 
 	return 0;
 }
