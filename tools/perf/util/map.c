@@ -648,17 +648,20 @@ void maps__put(struct maps *maps)
 		maps__delete(maps);
 }
 
+/**
+ * Acquires a refcount on map, which should be decreased by the caller.
+ */
 struct symbol *maps__find_symbol(struct maps *maps, u64 addr, struct map **mapp)
 {
 	struct map *map = maps__find(maps, addr);
 
 	/* Ensure map is loaded before using map->map_ip */
 	if (map != NULL && map__load(map) >= 0) {
-		if (mapp != NULL)
-			*mapp = map;
+		*mapp = map;
 		return map__find_symbol(map, map->map_ip(map, addr));
 	}
 
+	map__put(map);
 	return NULL;
 }
 

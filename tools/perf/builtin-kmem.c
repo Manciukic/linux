@@ -999,7 +999,7 @@ static void __print_slab_result(struct rb_root *root,
 		struct alloc_stat *data = rb_entry(next, struct alloc_stat,
 						   node);
 		struct symbol *sym = NULL;
-		struct map *map;
+		struct map *map = NULL;
 		char buf[BUFSIZ];
 		u64 addr;
 
@@ -1026,6 +1026,7 @@ static void __print_slab_result(struct rb_root *root,
 		       (unsigned long)data->pingpong,
 		       fragmentation(data->bytes_req, data->bytes_alloc));
 
+		map__put(map);
 		next = rb_next(next);
 	}
 
@@ -1082,6 +1083,7 @@ static void __print_page_alloc_result(struct perf_session *session, int n_lines)
 		       migrate_type_str[data->migrate_type],
 		       gfp_len, compact_gfp_string(data->gfp_flags), caller);
 
+		map__put(map);
 		next = rb_next(next);
 	}
 
@@ -1124,6 +1126,7 @@ static void __print_page_caller_result(struct perf_session *session, int n_lines
 		       migrate_type_str[data->migrate_type],
 		       gfp_len, compact_gfp_string(data->gfp_flags), caller);
 
+		map__put(map);
 		next = rb_next(next);
 	}
 

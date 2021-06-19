@@ -111,6 +111,7 @@ int test__vmlinux_matches_kallsyms(struct test *test __maybe_unused, int subtest
 	 */
 	map__for_each_symbol(vmlinux_map, sym, nd) {
 		struct symbol *pair, *first_pair;
+		struct map *sym_map, *first_sym_map;
 
 		sym  = rb_entry(nd, struct symbol, rb_node);
 
@@ -120,8 +121,9 @@ int test__vmlinux_matches_kallsyms(struct test *test __maybe_unused, int subtest
 		mem_start = vmlinux_map->unmap_ip(vmlinux_map, sym->start);
 		mem_end = vmlinux_map->unmap_ip(vmlinux_map, sym->end);
 
-		first_pair = machine__find_kernel_symbol(&kallsyms, mem_start, NULL);
-		pair = first_pair;
+		pair = machine__find_kernel_symbol(&kallsyms, mem_start, &sym_map);
+		first_pair = pair;
+		first_sym_map = map__get(sym_map);
 
 		if (pair && UM(pair->start) == mem_start) {
 next_pair:
@@ -149,7 +151,8 @@ next_pair:
 				 */
 				goto next_iter;
 			} else {
-				pair = machine__find_kernel_symbol_by_name(&kallsyms, sym->name, NULL);
+				map__put(sym_map);
+				pair = machine__find_kernel_symbol_by_name(&kallsyms, sym->name, &sym_map);
 				if (pair) {
 					if (UM(pair->start) == mem_start)
 						goto next_pair;
@@ -176,6 +179,8 @@ next_pair:
 
 		err = -1;
 next_iter:
+		map__put(first_sym_map);
+		map__put(sym_map);
 	}
 
 	if (verbose <= 0)
