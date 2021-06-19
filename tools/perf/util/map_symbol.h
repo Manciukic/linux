@@ -3,6 +3,8 @@
 #define __PERF_MAP_SYMBOL 1
 
 #include <linux/types.h>
+#include "map.h"
+#include "maps.h"
 
 struct maps;
 struct map;
@@ -21,4 +23,16 @@ struct addr_map_symbol {
 	u64	      phys_addr;
 	u64	      data_page_size;
 };
+
+static inline void map_symbol__put_members(struct map_symbol *ms)
+{
+	maps__put(ms->maps);
+	map__put(ms->map);
+}
+
+static inline void map_symbol__zput_members(struct map_symbol *ms)
+{
+	maps__zput(ms->maps);
+	map__zput(ms->map);
+}
 #endif // __PERF_MAP_SYMBOL

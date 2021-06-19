@@ -85,4 +85,21 @@ const char *branch_type_name(int type);
 void branch_type_stat_display(FILE *fp, struct branch_type_stat *st);
 int branch_type_str(struct branch_type_stat *st, char *bf, int bfsize);
 
+static inline void branch_info__put_members(struct branch_info *bi)
+{
+	map_symbol__put_members(&bi->from.ms);
+	map_symbol__put_members(&bi->to.ms);
+}
+
+static inline void branch_info__zput_members(struct branch_info *bi)
+{
+	map_symbol__zput_members(&bi->from.ms);
+	map_symbol__zput_members(&bi->to.ms);
+}
+
+static inline void branch_info__delete(struct branch_info *bi)
+{
+	branch_info__zput_members(bi);
+	free(bi);
+}
 #endif /* _PERF_BRANCH_H */

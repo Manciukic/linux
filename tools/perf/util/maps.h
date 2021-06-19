@@ -84,4 +84,12 @@ int maps__merge_in(struct maps *kmaps, struct map *new_map);
 
 void __maps__sort_by_name(struct maps *maps);
 
+static inline void __maps__zput(struct maps **maps)
+{
+	maps__put(*maps);
+	*maps = NULL;
+}
+
+#define maps__zput(maps) __maps__zput(&maps)
+
 #endif // __PERF_MAPS_H
