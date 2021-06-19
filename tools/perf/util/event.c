@@ -550,6 +550,10 @@ int perf_event__process(struct perf_tool *tool __maybe_unused,
 	return machine__process_event(machine, event, sample);
 }
 
+/**
+ * Callers need to call addr_location__put_members to drop references to contained 
+ * map, maps and thread.
+ */
 struct map *thread__find_map(struct thread *thread, u8 cpumode, u64 addr,
 			     struct addr_location *al)
 {
@@ -581,7 +585,6 @@ struct map *thread__find_map(struct thread *thread, u8 cpumode, u64 addr,
 		al->level = 'u';
 	} else {
 		al->level = 'H';
-		al->map = NULL;
 
 		if ((cpumode == PERF_RECORD_MISC_GUEST_USER ||
 			cpumode == PERF_RECORD_MISC_GUEST_KERNEL) &&
@@ -596,7 +599,6 @@ struct map *thread__find_map(struct thread *thread, u8 cpumode, u64 addr,
 	}
 
 	al->map = maps__find(maps, al->addr);
-	map__put(al->map); // TODO next patch: keep status quo in this patch
 	if (al->map != NULL) {
 		/*
 		 * Kernel maps might be changed when loading symbols so loading
@@ -608,6 +610,8 @@ struct map *thread__find_map(struct thread *thread, u8 cpumode, u64 addr,
 	}
 
 out:
+	maps__get(al->maps);
+	thread__get(al->thread);
 	return al->map;
 }
 
@@ -615,6 +619,9 @@ out:
  * For branch stacks or branch samples, the sample cpumode might not be correct
  * because it applies only to the sample 'ip' and not necessary to 'addr' or
  * branch stack addresses. If possible, use a fallback to deal with those cases.
+ * 
+ * Callers need to call addr_location__put_members to drop references to contained 
+ * map, maps and thread.
  */
 struct map *thread__find_map_fb(struct thread *thread, u8 cpumode, u64 addr,
 				struct addr_location *al)
@@ -626,9 +633,15 @@ struct map *thread__find_map_fb(struct thread *thread, u8 cpumode, u64 addr,
 	if (map || addr_cpumode == cpumode)
 		return map;
 
+	addr_location__put_members(al);
+
 	return thread__find_map(thread, addr_cpumode, addr, al);
 }
 
+/**
+ * Callers need to call addr_location__put_members to drop references to contained 
+ * map, maps and thread.
+ */
 struct symbol *thread__find_symbol(struct thread *thread, u8 cpumode,
 				   u64 addr, struct addr_location *al)
 {
@@ -638,6 +651,10 @@ struct symbol *thread__find_symbol(struct thread *thread, u8 cpumode,
 	return al->sym;
 }
 
+/**
+ * Callers need to call addr_location__put_members to drop references to contained 
+ * map, maps and thread.
+ */
 struct symbol *thread__find_symbol_fb(struct thread *thread, u8 cpumode,
 				      u64 addr, struct addr_location *al)
 {
@@ -660,9 +677,9 @@ static bool check_address_range(struct intlist *addr_list, int addr_range,
 	return false;
 }
 
-/*
- * Callers need to drop the reference to al->thread, obtained in
- * machine__findnew_thread()
+/**
+ * Callers need to call addr_location__put_members to drop references to contained 
+ * map, maps and thread.
  */
 int machine__resolve(struct machine *machine, struct addr_location *al,
 		     struct perf_sample *sample)
@@ -681,6 +698,8 @@ int machine__resolve(struct machine *machine, struct addr_location *al,
 
 	if (thread__is_filtered(thread))
 		al->filtered |= (1 << HIST_FILTER__THREAD);
+
+	thread__put(thread); // referenced by al now
 
 	al->sym = NULL;
 	al->cpu = sample->cpu;
@@ -745,13 +764,14 @@ int machine__resolve(struct machine *machine, struct addr_location *al,
 }
 
 /*
- * The preprocess_sample method will return with reference counts for the
- * in it, when done using (and perhaps getting ref counts if needing to
- * keep a pointer to one of those entries) it must be paired with
- * addr_location__put_members(), so that the refcounts can be decremented.
+ * Whenever a addr_location is obtained from a function, it contains 
+ * refcounted map, maps and thread. This function is used to put all these
+ * counts at the same time.
  */
 void addr_location__put_members(struct addr_location *al)
 {
+	map__put(al->map);
+	maps__put(al->maps);
 	thread__zput(al->thread);
 }
 

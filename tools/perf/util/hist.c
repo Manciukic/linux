@@ -925,8 +925,10 @@ iter_next_branch_entry(struct hist_entry_iter *iter, struct addr_location *al)
 	if (iter->curr >= iter->total)
 		return 0;
 
-	al->maps = bi[i].to.ms.maps;
-	al->map = bi[i].to.ms.map;
+	maps__put(al->maps);
+	map__put(al->map);
+	al->maps = maps__get(bi[i].to.ms.maps);
+	al->map = map__get(bi[i].to.ms.map);
 	al->sym = bi[i].to.ms.sym;
 	al->addr = bi[i].to.addr;
 	return 1;

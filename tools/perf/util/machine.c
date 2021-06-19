@@ -2199,6 +2199,9 @@ static int add_callchain_ip(struct thread *thread,
 			/* Treat this symbol as the root,
 			   forgetting its callees. */
 			*root_al = al;
+			maps__get(root_al->maps);
+			map__get(root_al->map);
+			thread__get(root_al->thread);
 			callchain_cursor_reset(cursor);
 		}
 	}

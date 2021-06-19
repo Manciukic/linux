@@ -125,7 +125,7 @@ int block_info__process_sym(struct hist_entry *he, struct block_hist *bh,
 		return 0;
 
 	memset(&al, 0, sizeof(al));
-	al.map = he->ms.map;
+	al.map = map__get(he->ms.map);
 	al.sym = he->ms.sym;
 
 	notes = symbol__annotation(he->ms.sym);
