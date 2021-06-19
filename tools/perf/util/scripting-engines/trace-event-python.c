@@ -502,12 +502,14 @@ static PyObject *python_process_brstack(struct perf_sample *sample,
 		thread__find_map_fb(thread, sample->cpumode,
 				    entries[i].from, &al);
 		dsoname = get_dsoname(al.map);
+		addr_location__put_members(&al);
 		pydict_set_item_string_decref(pyelem, "from_dsoname",
 					      _PyUnicode_FromString(dsoname));
 
 		thread__find_map_fb(thread, sample->cpumode,
 				    entries[i].to, &al);
 		dsoname = get_dsoname(al.map);
+		addr_location__put_members(&al);
 		pydict_set_item_string_decref(pyelem, "to_dsoname",
 					      _PyUnicode_FromString(dsoname));
 
@@ -587,12 +589,14 @@ static PyObject *python_process_brstacksym(struct perf_sample *sample,
 		get_symoff(al.sym, &al, true, bf, sizeof(bf));
 		pydict_set_item_string_decref(pyelem, "from",
 					      _PyUnicode_FromString(bf));
+		addr_location__put_members(&al);
 
 		thread__find_symbol_fb(thread, sample->cpumode,
 				       entries[i].to, &al);
 		get_symoff(al.sym, &al, true, bf, sizeof(bf));
 		pydict_set_item_string_decref(pyelem, "to",
 					      _PyUnicode_FromString(bf));
+		addr_location__put_members(&al);
 
 		get_br_mspred(&entries[i].flags, bf, sizeof(bf));
 		pydict_set_item_string_decref(pyelem, "pred",

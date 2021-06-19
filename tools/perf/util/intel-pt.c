@@ -625,6 +625,7 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 	bool nr;
 	int ret = 0;
 
+	memset(&al, 0, sizeof(al));
 	intel_pt_insn->length = 0;
 
 	if (to_ip && *ip == to_ip)
@@ -727,6 +728,8 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 			offset += intel_pt_insn->length;
 		}
 		one_map = false;
+
+		addr_location__put_members(&al);
 	}
 out:
 	*insn_cnt_ptr = insn_cnt;
@@ -752,6 +755,7 @@ out:
 			   *ip - start_ip, intel_pt_insn);
 
 out_put:
+	addr_location__put_members(&al);
 	return ret;
 
 out_no_cache:
@@ -831,6 +835,7 @@ static int __intel_pt_pgd_ip(uint64_t ip, void *data)
 	ret = intel_pt_match_pgd_ip(ptq->pt, ip, offset,
 				     al.map->dso->long_name);
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 
@@ -2797,6 +2802,7 @@ static int intel_pt_find_map(struct thread *thread, u8 cpumode, u64 addr,
 			     struct addr_location *al)
 {
 	if (!al->map || addr < al->map->start || addr >= al->map->end) {
+		addr_location__put_members(al);
 		if (!thread__find_map(thread, cpumode, addr, al))
 			return -1;
 	}
@@ -2812,10 +2818,12 @@ static int intel_pt_text_poke(struct intel_pt *pt, union perf_event *event)
 	/* Assume text poke begins in a basic block no more than 4096 bytes */
 	int cnt = 4096 + event->text_poke.new_len;
 	struct thread *thread = pt->unknown_thread;
-	struct addr_location al = { .map = NULL };
+	struct addr_location al;
 	struct machine *machine = pt->machine;
 	struct intel_pt_cache_entry *e;
 	u64 offset;
+
+	memset(&al, 0, sizeof(al));
 
 	if (!event->text_poke.new_len)
 		return 0;
@@ -2852,6 +2860,7 @@ static int intel_pt_text_poke(struct intel_pt *pt, union perf_event *event)
 	}
 
 out:
+	addr_location__put_members(&al);
 	return 0;
 }
 

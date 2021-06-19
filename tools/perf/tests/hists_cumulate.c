@@ -114,6 +114,8 @@ static int add_hist_entries(struct hists *hists, struct machine *machine)
 		fake_samples[i].thread = al.thread;
 		fake_samples[i].map = al.map;
 		fake_samples[i].sym = al.sym;
+
+		addr_location__put_members(&al);
 	}
 
 	return TEST_OK;

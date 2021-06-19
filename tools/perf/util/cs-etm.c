@@ -751,6 +751,7 @@ static u32 cs_etm__mem_access(struct cs_etm_queue *etmq, u8 trace_chan_id,
 		len = 0;
 
 out:
+	addr_location__put_members(&al);
 	return len;
 }
 

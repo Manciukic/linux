@@ -374,6 +374,7 @@ static int read_object_code(u64 addr, size_t len, u8 cpumode,
 
 	ret = 0;
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 

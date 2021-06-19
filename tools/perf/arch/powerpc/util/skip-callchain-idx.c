@@ -280,5 +280,6 @@ int arch_skip_callchain_idx(struct thread *thread, struct ip_callchain *chain)
 		skip_slot = 3;
 	}
 out:
+	addr_location__put_members(&al);
 	return skip_slot;
 }

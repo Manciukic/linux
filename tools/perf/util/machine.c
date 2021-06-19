@@ -2077,6 +2077,8 @@ static void ip__resolve_ams(struct thread *thread,
 	ams->ms.map = al.map;
 	ams->phys_addr = 0;
 	ams->data_page_size = 0;
+
+	addr_location__put_members(&al);
 }
 
 static void ip__resolve_data(struct thread *thread,
@@ -2096,6 +2098,8 @@ static void ip__resolve_data(struct thread *thread,
 	ams->ms.map = al.map;
 	ams->phys_addr = phys_addr;
 	ams->data_page_size = daddr_page_size;
+
+	addr_location__put_members(&al);
 }
 
 struct mem_info *sample__resolve_mem(struct perf_sample *sample,
@@ -2198,6 +2202,7 @@ static int add_callchain_ip(struct thread *thread,
 		  symbol__match_regex(al.sym, &ignore_callees_regex)) {
 			/* Treat this symbol as the root,
 			   forgetting its callees. */
+			addr_location__put_members(root_al);
 			*root_al = al;
 			maps__get(root_al->maps);
 			map__get(root_al->map);
@@ -2224,6 +2229,7 @@ static int add_callchain_ip(struct thread *thread,
 				       branch, flags, nr_loop_iter,
 				       iter_cycles, branch_from, srcline);
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 

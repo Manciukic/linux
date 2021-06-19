@@ -371,6 +371,7 @@ static struct map *find_map(unw_word_t ip, struct unwind_info *ui)
 	
 	map = thread__find_map(ui->thread, PERF_RECORD_MISC_USER, ip, &al);
 
+	addr_location__put_members(&al);
 	return map;
 }
 
@@ -599,6 +600,7 @@ static int entry(u64 ip, struct thread *thread,
 
 	ret = cb(&e, arg);
 
+	addr_location__put_members(&al);
 	return ret;
 }
 

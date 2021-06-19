@@ -886,6 +886,11 @@ static int perf_sample__fprintf_brstack(struct perf_sample *sample,
 			entries[i].flags.in_tx ? 'X' : '-',
 			entries[i].flags.abort ? 'A' : '-',
 			entries[i].flags.cycles);
+
+		if (PRINT_FIELD(DSO)) {
+			addr_location__put_members(&alt);
+			addr_location__put_members(&alf);
+		}
 	}
 
 	return printed;
@@ -932,6 +937,9 @@ static int perf_sample__fprintf_brstacksym(struct perf_sample *sample,
 			entries[i].flags.in_tx ? 'X' : '-',
 			entries[i].flags.abort ? 'A' : '-',
 			entries[i].flags.cycles);
+
+		addr_location__put_members(&alf);
+		addr_location__put_members(&alt);
 	}
 
 	return printed;
@@ -982,6 +990,9 @@ static int perf_sample__fprintf_brstackoff(struct perf_sample *sample,
 			entries[i].flags.in_tx ? 'X' : '-',
 			entries[i].flags.abort ? 'A' : '-',
 			entries[i].flags.cycles);
+
+		addr_location__put_members(&alf);
+		addr_location__put_members(&alt);
 	}
 
 	return printed;
@@ -1046,6 +1057,7 @@ static int grab_bb(u8 *buffer, u64 start, u64 end,
 		pr_debug("\tcannot fetch code for block at %" PRIx64 "-%" PRIx64 "\n",
 			start, end);
 out:
+	addr_location__put_members(&al);
 	return len;
 }
 
@@ -1105,6 +1117,7 @@ static int print_srccode(struct thread *thread, u8 cpumode, uint64_t addr)
 	if (ret)
 		ret += printf("\n");
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 
@@ -1163,6 +1176,7 @@ static int ip__fprintf_sym(uint64_t addr, struct thread *thread,
 	*lastsym = al.sym;
 
 out:
+	addr_location__put_members(&al);
 	return printed;
 }
 
@@ -1353,6 +1367,7 @@ static const char *resolve_branch_sym(struct perf_sample *sample,
 				name = addr_al.sym->name;
 			else
 				*ip = sample->addr;
+			addr_location__put_members(&addr_al);
 		} else {
 			*ip = sample->addr;
 		}

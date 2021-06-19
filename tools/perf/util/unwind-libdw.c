@@ -94,6 +94,7 @@ static int report_module(u64 ip, struct unwind_info *ui)
 	
 	ret = __report_module(&al, ip, ui);
 
+	addr_location__put_members(&al);
 	return ret;
 }
 
@@ -119,6 +120,8 @@ static int entry(u64 ip, struct unwind_info *ui)
 		 al.sym ? al.sym->name : "''",
 		 ip,
 		 al.map ? al.map->map_ip(al.map, ip) : (u64) 0);
+
+	addr_location__put_members(&al);
 	return 0;
 }
 
@@ -154,6 +157,7 @@ static int access_dso_mem(struct unwind_info *ui, Dwarf_Addr addr,
 
 	ret = !(size == sizeof(*data));
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 

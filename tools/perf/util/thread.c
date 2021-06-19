@@ -457,6 +457,7 @@ int thread__memcpy(struct thread *thread, struct machine *machine,
 
        ret = dso__data_read_offset(al.map->dso, machine, offset, buf, len);
 out:
+	addr_location__put_members(&al);
 	return ret;
 }
 

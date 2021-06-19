@@ -208,10 +208,13 @@ static int process_sample_event(struct perf_tool *tool,
 
 			ok = thread__find_symbol(al.thread, cpumode, ip, &tal);
 			output_sample_callchain_entry(tool, ip, ok ? &tal : NULL);
+			addr_location__put_members(&tal);
 		}
 	} else {
 		output_sample_callchain_entry(tool, sample->ip, &al);
 	}
+	addr_location__put_members(&al);
+
 	output_json_format(out, false, 3, "]");
 
 	output_json_format(out, false, 2, "}");

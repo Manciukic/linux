@@ -387,6 +387,8 @@ static u64 find_callsite(struct evsel *evsel, struct perf_sample *sample)
 	struct machine *machine = &kmem_session->machines.host;
 	struct callchain_cursor_node *node;
 
+	memset(&al, 0, sizeof(al));
+
 	if (alloc_func_list == NULL) {
 		if (build_alloc_func_list() < 0)
 			goto out;
@@ -394,6 +396,7 @@ static u64 find_callsite(struct evsel *evsel, struct perf_sample *sample)
 
 	al.thread = machine__findnew_thread(machine, sample->pid, sample->tid);
 	sample__resolve_callchain(sample, &callchain_cursor, NULL, evsel, &al, 16);
+	addr_location__put_members(&al);
 
 	callchain_cursor_commit(&callchain_cursor);
 	while (true) {

@@ -2898,6 +2898,7 @@ static int trace__pgfault(struct trace *trace,
 
 	fprintf(trace->output, "] => ");
 
+	addr_location__put_members(&al);
 	thread__find_symbol(thread, sample->cpumode, sample->addr, &al);
 
 	if (!al.map) {
@@ -2912,6 +2913,8 @@ static int trace__pgfault(struct trace *trace,
 	print_location(trace->output, sample, &al, true, false);
 
 	fprintf(trace->output, " (%c%c)\n", map_type, al.level);
+
+	addr_location__put_members(&al);
 
 	if (callchain_ret > 0)
 		trace__fprintf_callchain(trace, sample);

@@ -154,6 +154,8 @@ int block_info__process_sym(struct hist_entry *he, struct block_hist *bh,
 		}
 	}
 
+	addr_location__put_members(&al);
+
 	if (block_cycles_aggr)
 		*block_cycles_aggr += cycles;
 

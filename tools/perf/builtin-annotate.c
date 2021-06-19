@@ -207,6 +207,7 @@ static int process_branch_callback(struct evsel *evsel,
 
 	ret = hist_entry_iter__add(&iter, &a, PERF_MAX_STACK_DEPTH, ann);
 out:
+	addr_location__put_members(&a);
 	return ret;
 }
 

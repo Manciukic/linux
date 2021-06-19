@@ -96,6 +96,8 @@ static int add_hist_entries(struct evlist *evlist, struct machine *machine)
 			fake_common_samples[k].thread = al.thread;
 			fake_common_samples[k].map = al.map;
 			fake_common_samples[k].sym = al.sym;
+
+			addr_location__put_members(&al);
 		}
 
 		for (k = 0; k < ARRAY_SIZE(fake_samples[i]); k++) {
@@ -115,6 +117,8 @@ static int add_hist_entries(struct evlist *evlist, struct machine *machine)
 			fake_samples[i][k].thread = al.thread;
 			fake_samples[i][k].map = al.map;
 			fake_samples[i][k].sym = al.sym;
+
+			addr_location__put_members(&al);
 		}
 		i++;
 	}
