@@ -316,7 +316,7 @@ static int process_sample_event(struct perf_tool *tool,
 	if (ret < 0)
 		pr_debug("problem adding hist entry, skipping event\n");
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 }
 

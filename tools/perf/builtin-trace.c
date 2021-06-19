@@ -2392,7 +2392,7 @@ static int trace__resolve_callchain(struct trace *trace, struct evsel *evsel,
 		return -1;
 
 	err = thread__resolve_callchain(al.thread, cursor, evsel, sample, NULL, NULL, max_stack);
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return err;
 }
 

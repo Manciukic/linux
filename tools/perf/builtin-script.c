@@ -2198,7 +2198,7 @@ static int process_sample_event(struct perf_tool *tool,
 		process_event(scr, sample, evsel, &al, machine);
 
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return 0;
 }
 

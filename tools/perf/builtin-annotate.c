@@ -285,7 +285,7 @@ static int process_sample_event(struct perf_tool *tool,
 		ret = -1;
 	}
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 }
 

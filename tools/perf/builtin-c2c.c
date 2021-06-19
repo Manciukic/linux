@@ -350,7 +350,7 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 	}
 
 out:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 
 free_mi:

@@ -73,7 +73,7 @@ static int add_hist_entries(struct hists *hists, struct machine *machine)
 
 		if (hist_entry_iter__add(&iter, &al, sysctl_perf_event_max_stack,
 					 NULL) < 0) {
-			addr_location__put(&al);
+			addr_location__put_members(&al);
 			goto out;
 		}
 
