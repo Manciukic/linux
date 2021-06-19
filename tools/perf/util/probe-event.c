@@ -120,7 +120,7 @@ static struct ref_reloc_sym *kernel_get_ref_reloc_sym(struct map **pmap)
 		return NULL;
 
 	if (pmap)
-		*pmap = map;
+		*pmap = map__get(map);
 
 	return kmap->ref_reloc_sym;
 }
@@ -139,6 +139,7 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 		*addr = (!map->reloc || reloc) ? reloc_sym->addr :
 			reloc_sym->unrelocated_addr;
 	else {
+		map__put(map);
 		sym = machine__find_kernel_symbol_by_name(host_machine, name, &map);
 		if (!sym){
 			ret = -ENOENT;
@@ -150,6 +151,7 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 	}
 	ret = 0;
 out:
+	map__put(map);
 	return ret;
 }
 
@@ -860,6 +862,7 @@ post_process_kernel_probe_trace_events(struct probe_trace_event *tevs,
 				      reloc_sym->addr);
 	}
 out:
+	map__put(map);
 	return skipped;
 }
 
@@ -2988,7 +2991,7 @@ void __weak arch__fix_tev_from_maps(struct perf_probe_event *pev __maybe_unused,
 static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 					    struct probe_trace_event **tevs)
 {
-	struct map *map = NULL;
+	struct map *map = NULL, *reloc_sym_map = NULL;
 	struct ref_reloc_sym *reloc_sym = NULL;
 	struct symbol *sym;
 	struct symbol **syms = NULL;
@@ -3031,7 +3034,7 @@ static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 	/* Note that the symbols in the kmodule are not relocated */
 	if (!pev->uprobes && !pev->target &&
 			(!pp->retprobe || kretprobe_offset_is_supported())) {
-		reloc_sym = kernel_get_ref_reloc_sym(NULL);
+		reloc_sym = kernel_get_ref_reloc_sym(&reloc_sym_map);
 		if (!reloc_sym) {
 			pr_warning("Relocated base symbol is not found!\n");
 			ret = -EINVAL;
@@ -3136,6 +3139,7 @@ static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 
 out:
 	map__put(map);
+	map__put(reloc_sym_map);
 	free(syms);
 	return ret;
 
