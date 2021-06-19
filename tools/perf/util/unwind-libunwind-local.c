@@ -371,6 +371,7 @@ static struct map *find_map(unw_word_t ip, struct unwind_info *ui)
 	
 	map = thread__find_map(ui->thread, PERF_RECORD_MISC_USER, ip, &al);
 
+	map__get(map); // releasing al will release map too
 	addr_location__put_members(&al);
 	return map;
 }
@@ -432,6 +433,7 @@ find_proc_info(unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
 	}
 #endif
 out:
+	map__put(map);
 	return ret;
 }
 
@@ -491,6 +493,7 @@ static int access_dso_mem(struct unwind_info *ui, unw_word_t addr,
 
 	ret = !(size == sizeof(*data));
 out:
+	map__put(map);
 	return ret;
 }
 
