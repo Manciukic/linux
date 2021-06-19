@@ -3173,7 +3173,7 @@ struct dso *machine__findnew_dso(struct machine *machine, const char *filename)
 char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, char **modp)
 {
 	struct machine *machine = vmachine;
-	struct map *map;
+	struct map *map = NULL;
 	struct symbol *sym = machine__find_kernel_symbol(machine, *addrp, &map);
 
 	if (sym == NULL)
@@ -3181,6 +3181,7 @@ char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, ch
 
 	*modp = __map__is_kmodule(map) ? (char *)map->dso->short_name : NULL;
 	*addrp = map->unmap_ip(map, sym->start);
+	map__put(map);
 	return sym->name;
 }
 

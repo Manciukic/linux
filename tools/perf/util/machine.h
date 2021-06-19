@@ -226,6 +226,9 @@ struct symbol *machine__find_kernel_symbol(struct machine *machine, u64 addr,
 	return maps__find_symbol(&machine->kmaps, addr, mapp);
 }
 
+/**
+ * Acquires a refcount on map, which should be decreased by the caller.
+ */
 static inline
 struct symbol *machine__find_kernel_symbol_by_name(struct machine *machine,
 						   const char *name,

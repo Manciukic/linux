@@ -672,6 +672,9 @@ static bool map__contains_symbol(struct map *map, struct symbol *sym)
 	return ip >= map->start && ip < map->end;
 }
 
+/**
+ * Acquires a refcount on map, which should be decreased by the caller.
+ */
 struct symbol *maps__find_symbol_by_name(struct maps *maps, const char *name, struct map **mapp)
 {
 	struct symbol *sym;
@@ -689,7 +692,7 @@ struct symbol *maps__find_symbol_by_name(struct maps *maps, const char *name, st
 			continue;
 		}
 		if (mapp != NULL)
-			*mapp = pos;
+			*mapp = map__get(pos);
 		goto out;
 	}
 
