@@ -162,15 +162,19 @@ static struct map *kernel_get_module_map(const char *module)
 		return map__get(pos);
 	}
 
+	down_read(&maps->lock);
 	maps__for_each_entry(maps, pos) {
 		/* short_name is "[module]" */
 		if (strncmp(pos->dso->short_name + 1, module,
 			    pos->dso->short_name_len - 2) == 0 &&
-		    module[pos->dso->short_name_len - 2] == '\0') {
-			return map__get(pos);
-		}
+		    module[pos->dso->short_name_len - 2] == '\0')
+			goto out;
 	}
-	return NULL;
+	pos = NULL;
+out:
+	map__get(pos);
+	up_read(&maps->lock);
+	return pos;
 }
 
 struct map *get_target_map(const char *target, struct nsinfo *nsi, bool user)

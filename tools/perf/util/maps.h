@@ -19,9 +19,11 @@ struct map *maps__find(struct maps *maps, u64 addr);
 struct map *maps__first(struct maps *maps);
 struct map *map__next(struct map *map);
 
+/* requires maps->lock */ 
 #define maps__for_each_entry(maps, map) \
 	for (map = maps__first(maps); map; map = map__next(map))
 
+/* requires maps->lock */ 
 #define maps__for_each_entry_safe(maps, map, next) \
 	for (map = maps__first(maps), next = map__next(map); map; map = next, next = map__next(map))
 

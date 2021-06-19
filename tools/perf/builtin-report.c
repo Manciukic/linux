@@ -792,6 +792,7 @@ static size_t maps__fprintf_task(struct maps *maps, int indent, FILE *fp)
 	size_t printed = 0;
 	struct map *map;
 
+	down_read(&maps->lock);
 	maps__for_each_entry(maps, map) {
 		printed += fprintf(fp, "%*s  %" PRIx64 "-%" PRIx64 " %c%c%c%c %08" PRIx64 " %" PRIu64 " %s\n",
 				   indent, "", map->start, map->end,
@@ -802,6 +803,7 @@ static size_t maps__fprintf_task(struct maps *maps, int indent, FILE *fp)
 				   map->pgoff,
 				   map->dso->id.ino, map->dso->name);
 	}
+	up_read(&maps->lock);
 
 	return printed;
 }

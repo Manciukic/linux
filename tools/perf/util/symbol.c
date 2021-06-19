@@ -1090,6 +1090,7 @@ static int do_validate_kcore_modules(const char *filename, struct maps *kmaps)
 	if (err)
 		return err;
 
+	down_read(&kmaps->lock);
 	maps__for_each_entry(kmaps, old_map) {
 		struct module_info *mi;
 
@@ -1105,6 +1106,7 @@ static int do_validate_kcore_modules(const char *filename, struct maps *kmaps)
 		}
 	}
 out:
+	up_read(&kmaps->lock);
 	delete_modules(&modules);
 	return err;
 }
