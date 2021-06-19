@@ -623,6 +623,7 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 	u64 insn_cnt = 0;
 	bool one_map = true;
 	bool nr;
+	int ret = 0;
 
 	intel_pt_insn->length = 0;
 
@@ -648,13 +649,17 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 	}
 
 	while (1) {
-		if (!thread__find_map(thread, cpumode, *ip, &al) || !al.map->dso)
-			return -EINVAL;
+		if (!thread__find_map(thread, cpumode, *ip, &al) || !al.map->dso){
+			ret = -EINVAL;
+			goto out_put;
+		}
 
 		if (al.map->dso->data.status == DSO_DATA_STATUS_ERROR &&
 		    dso__data_status_seen(al.map->dso,
-					  DSO_DATA_STATUS_SEEN_ITRACE))
-			return -ENOENT;
+					  DSO_DATA_STATUS_SEEN_ITRACE)){
+			ret = -ENOENT;
+			goto out_put;
+		}
 
 		offset = al.map->map_ip(al.map, *ip);
 
@@ -673,7 +678,7 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 				memcpy(intel_pt_insn->buf, e->insn,
 				       INTEL_PT_INSN_BUF_SZ);
 				intel_pt_log_insn_no_data(intel_pt_insn, *ip);
-				return 0;
+				goto out_put;
 			}
 		}
 
@@ -689,11 +694,15 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 			len = dso__data_read_offset(al.map->dso, machine,
 						    offset, buf,
 						    INTEL_PT_INSN_BUF_SZ);
-			if (len <= 0)
-				return -EINVAL;
+			if (len <= 0){
+				ret = -EINVAL;
+				goto out_put;
+			}
 
-			if (intel_pt_get_insn(buf, len, x86_64, intel_pt_insn))
-				return -EINVAL;
+			if (intel_pt_get_insn(buf, len, x86_64, intel_pt_insn)){
+				ret = -EINVAL;
+				goto out_put;
+			}
 
 			intel_pt_log_insn(intel_pt_insn, *ip);
 
@@ -734,18 +743,20 @@ out:
 
 		e = intel_pt_cache_lookup(al.map->dso, machine, start_offset);
 		if (e)
-			return 0;
+			goto out_put;
+
 	}
 
 	/* Ignore cache errors */
 	intel_pt_cache_add(al.map->dso, machine, start_offset, insn_cnt,
 			   *ip - start_ip, intel_pt_insn);
 
-	return 0;
+out_put:
+	return ret;
 
 out_no_cache:
 	*insn_cnt_ptr = insn_cnt;
-	return 0;
+	goto out_put;
 }
 
 static bool intel_pt_match_pgd_ip(struct intel_pt *pt, uint64_t ip,
@@ -793,6 +804,7 @@ static int __intel_pt_pgd_ip(uint64_t ip, void *data)
 	struct addr_location al;
 	u8 cpumode;
 	u64 offset;
+	int ret;
 
 	if (ptq->state->to_nr) {
 		if (intel_pt_guest_kernel_ip(ip))
@@ -809,13 +821,17 @@ static int __intel_pt_pgd_ip(uint64_t ip, void *data)
 	if (!thread)
 		return -EINVAL;
 
-	if (!thread__find_map(thread, cpumode, ip, &al) || !al.map->dso)
-		return -EINVAL;
+	if (!thread__find_map(thread, cpumode, ip, &al) || !al.map->dso) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	offset = al.map->map_ip(al.map, ip);
 
-	return intel_pt_match_pgd_ip(ptq->pt, ip, offset,
+	ret = intel_pt_match_pgd_ip(ptq->pt, ip, offset,
 				     al.map->dso->long_name);
+out:
+	return ret;
 }
 
 static bool intel_pt_pgd_ip(uint64_t ip, void *data)
@@ -2807,7 +2823,7 @@ static int intel_pt_text_poke(struct intel_pt *pt, union perf_event *event)
 	for (; cnt; cnt--, addr--) {
 		if (intel_pt_find_map(thread, cpumode, addr, &al)) {
 			if (addr < event->text_poke.addr)
-				return 0;
+				goto out;
 			continue;
 		}
 
@@ -2827,7 +2843,7 @@ static int intel_pt_text_poke(struct intel_pt *pt, union perf_event *event)
 			 * branch instruction before the text poke address.
 			 */
 			if (e->branch != INTEL_PT_BR_NO_BRANCH)
-				return 0;
+				goto out;
 		} else {
 			intel_pt_cache_invalidate(al.map->dso, machine, offset);
 			intel_pt_log("Invalidated instruction cache for %s at %#"PRIx64"\n",
@@ -2835,6 +2851,7 @@ static int intel_pt_text_poke(struct intel_pt *pt, union perf_event *event)
 		}
 	}
 
+out:
 	return 0;
 }
 

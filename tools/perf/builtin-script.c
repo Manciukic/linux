@@ -992,7 +992,7 @@ static int grab_bb(u8 *buffer, u64 start, u64 end,
 		    struct machine *machine, struct thread *thread,
 		    bool *is64bit, u8 *cpumode, bool last)
 {
-	long offset, len;
+	long offset, len = 0;
 	struct addr_location al;
 	bool kernel;
 
@@ -1027,11 +1027,11 @@ static int grab_bb(u8 *buffer, u64 start, u64 end,
 
 	if (!thread__find_map(thread, *cpumode, start, &al) || !al.map->dso) {
 		pr_debug("\tcannot resolve %" PRIx64 "-%" PRIx64 "\n", start, end);
-		return 0;
+		goto out;
 	}
 	if (al.map->dso->data.status == DSO_DATA_STATUS_ERROR) {
 		pr_debug("\tcannot resolve %" PRIx64 "-%" PRIx64 "\n", start, end);
-		return 0;
+		goto out;
 	}
 
 	/* Load maps to ensure dso->is_64_bit has been updated */
@@ -1045,6 +1045,7 @@ static int grab_bb(u8 *buffer, u64 start, u64 end,
 	if (len <= 0)
 		pr_debug("\tcannot fetch code for block at %" PRIx64 "-%" PRIx64 "\n",
 			start, end);
+out:
 	return len;
 }
 
@@ -1098,11 +1099,12 @@ static int print_srccode(struct thread *thread, u8 cpumode, uint64_t addr)
 	memset(&al, 0, sizeof(al));
 	thread__find_map(thread, cpumode, addr, &al);
 	if (!al.map)
-		return 0;
+		goto out;
 	ret = map__fprintf_srccode(al.map, al.addr, stdout,
 		    &thread->srccode_state);
 	if (ret)
 		ret += printf("\n");
+out:
 	return ret;
 }
 
@@ -1137,7 +1139,7 @@ static int ip__fprintf_sym(uint64_t addr, struct thread *thread,
 	thread__find_map(thread, cpumode, addr, &al);
 
 	if ((*lastsym) && al.addr >= (*lastsym)->start && al.addr < (*lastsym)->end)
-		return 0;
+		goto out;
 
 	al.cpu = cpu;
 	al.sym = NULL;
@@ -1145,7 +1147,7 @@ static int ip__fprintf_sym(uint64_t addr, struct thread *thread,
 		al.sym = map__find_symbol(al.map, al.addr);
 
 	if (!al.sym)
-		return 0;
+		goto out;
 
 	if (al.addr < al.sym->end)
 		off = al.addr - al.sym->start;
@@ -1160,6 +1162,7 @@ static int ip__fprintf_sym(uint64_t addr, struct thread *thread,
 	printed += fprintf(fp, "\n");
 	*lastsym = al.sym;
 
+out:
 	return printed;
 }
 

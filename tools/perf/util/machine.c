@@ -769,6 +769,7 @@ static int machine__process_ksymbol_register(struct machine *machine,
 {
 	struct symbol *sym;
 	struct map *map = maps__find(&machine->kmaps, event->ksymbol.addr);
+	int ret;
 
 	if (!map) {
 		struct dso *dso = dso__new(event->ksymbol.name);
@@ -804,10 +805,16 @@ static int machine__process_ksymbol_register(struct machine *machine,
 	sym = symbol__new(map->map_ip(map, map->start),
 			  event->ksymbol.len,
 			  0, 0, event->ksymbol.name);
-	if (!sym)
-		return -ENOMEM;
+	if (!sym) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
 	dso__insert_symbol(map->dso, sym);
-	return 0;
+
+	ret = 0;
+out:
+	return ret;
 }
 
 static int machine__process_ksymbol_unregister(struct machine *machine,
@@ -2146,6 +2153,7 @@ static int add_callchain_ip(struct thread *thread,
 	int nr_loop_iter = 0;
 	u64 iter_cycles = 0;
 	const char *srcline = NULL;
+	int ret;
 
 	al.filtered = 0;
 	al.sym = NULL;
@@ -2191,8 +2199,10 @@ static int add_callchain_ip(struct thread *thread,
 		}
 	}
 
-	if (symbol_conf.hide_unresolved && al.sym == NULL)
-		return 0;
+	if (symbol_conf.hide_unresolved && al.sym == NULL){
+		ret = 0;
+		goto out;
+	}
 
 	if (iter) {
 		nr_loop_iter = iter->nr_loop_iter;
@@ -2203,9 +2213,11 @@ static int add_callchain_ip(struct thread *thread,
 	ms.map = al.map;
 	ms.sym = al.sym;
 	srcline = callchain_srcline(&ms, al.addr);
-	return callchain_cursor_append(cursor, ip, &ms,
+	ret = callchain_cursor_append(cursor, ip, &ms,
 				       branch, flags, nr_loop_iter,
 				       iter_cycles, branch_from, srcline);
+out:
+	return ret;
 }
 
 struct branch_info *sample__resolve_bstack(struct perf_sample *sample,

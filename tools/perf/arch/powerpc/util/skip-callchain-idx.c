@@ -259,7 +259,7 @@ int arch_skip_callchain_idx(struct thread *thread, struct ip_callchain *chain)
 
 	if (!dso) {
 		pr_debug("%" PRIx64 " dso is NULL\n", ip);
-		return skip_slot;
+		goto out;
 	}
 
 	rc = check_return_addr(dso, al.map->start, ip);
@@ -279,5 +279,6 @@ int arch_skip_callchain_idx(struct thread *thread, struct ip_callchain *chain)
 		 */
 		skip_slot = 3;
 	}
+out:
 	return skip_slot;
 }

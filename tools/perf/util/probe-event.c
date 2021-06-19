@@ -131,6 +131,7 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 	struct ref_reloc_sym *reloc_sym;
 	struct symbol *sym;
 	struct map *map;
+	int ret;
 
 	/* ref_reloc_sym is just a label. Need a special fix*/
 	reloc_sym = kernel_get_ref_reloc_sym(&map);
@@ -139,13 +140,17 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 			reloc_sym->unrelocated_addr;
 	else {
 		sym = machine__find_kernel_symbol_by_name(host_machine, name, &map);
-		if (!sym)
-			return -ENOENT;
+		if (!sym){
+			ret = -ENOENT;
+			goto out;
+		}
 		*addr = map->unmap_ip(map, sym->start) -
 			((reloc) ? 0 : map->reloc) -
 			((reladdr) ? map->start : 0);
 	}
-	return 0;
+	ret = 0;
+out:
+	return ret;
 }
 
 static struct map *kernel_get_module_map(const char *module)
@@ -839,8 +844,10 @@ post_process_kernel_probe_trace_events(struct probe_trace_event *tevs,
 			skipped++;
 		} else {
 			tmp = strdup(reloc_sym->name);
-			if (!tmp)
-				return -ENOMEM;
+			if (!tmp){
+				skipped = -ENOMEM;
+				goto out;
+			}
 		}
 		/* If we have no realname, use symbol for it */
 		if (!tevs[i].point.realname)
@@ -852,6 +859,7 @@ post_process_kernel_probe_trace_events(struct probe_trace_event *tevs,
 			(map->reloc ? reloc_sym->unrelocated_addr :
 				      reloc_sym->addr);
 	}
+out:
 	return skipped;
 }
 

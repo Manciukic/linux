@@ -439,20 +439,25 @@ int thread__memcpy(struct thread *thread, struct machine *machine,
        u8 cpumode = PERF_RECORD_MISC_USER;
        struct addr_location al;
        long offset;
+       int ret;
 
        if (machine__kernel_ip(machine, ip))
                cpumode = PERF_RECORD_MISC_KERNEL;
 
        if (!thread__find_map(thread, cpumode, ip, &al) || !al.map->dso ||
 	   al.map->dso->data.status == DSO_DATA_STATUS_ERROR ||
-	   map__load(al.map) < 0)
-               return -1;
+	   map__load(al.map) < 0){
+		ret = -1;
+		goto out;
+	}
 
        offset = al.map->map_ip(al.map, ip);
        if (is64bit)
                *is64bit = al.map->dso->is_64_bit;
 
-       return dso__data_read_offset(al.map->dso, machine, offset, buf, len);
+       ret = dso__data_read_offset(al.map->dso, machine, offset, buf, len);
+out:
+	return ret;
 }
 
 void thread__free_stitch_list(struct thread *thread)

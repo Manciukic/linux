@@ -90,8 +90,11 @@ static int __report_module(struct addr_location *al, u64 ip,
 static int report_module(u64 ip, struct unwind_info *ui)
 {
 	struct addr_location al;
+	int ret;
+	
+	ret = __report_module(&al, ip, ui);
 
-	return __report_module(&al, ip, ui);
+	return ret;
 }
 
 /*
@@ -134,19 +137,24 @@ static int access_dso_mem(struct unwind_info *ui, Dwarf_Addr addr,
 {
 	struct addr_location al;
 	ssize_t size;
+	int ret;
 
 	if (!thread__find_map(ui->thread, PERF_RECORD_MISC_USER, addr, &al)) {
 		pr_debug("unwind: no map for %lx\n", (unsigned long)addr);
 		return -1;
 	}
 
-	if (!al.map->dso)
-		return -1;
+	if (!al.map->dso){
+		ret = -1;
+		goto out;
+	}
 
 	size = dso__data_read_addr(al.map->dso, al.map, ui->machine,
 				   addr, (u8 *) data, sizeof(*data));
 
-	return !(size == sizeof(*data));
+	ret = !(size == sizeof(*data));
+out:
+	return ret;
 }
 
 static bool memory_read(Dwfl *dwfl __maybe_unused, Dwarf_Addr addr, Dwarf_Word *result,

@@ -147,7 +147,7 @@ next_pair:
 				 * possible to get proper function end from
 				 * kallsyms.
 				 */
-				continue;
+				goto next_iter;
 			} else {
 				pair = machine__find_kernel_symbol_by_name(&kallsyms, sym->name, NULL);
 				if (pair) {
@@ -161,20 +161,21 @@ next_pair:
 						 mem_start, sym->name, first_pair->name);
 				}
 
-				continue;
+				goto next_iter;
 			}
 		} else if (mem_start == kallsyms.vmlinux_map->end) {
 			/*
 			 * Ignore aliases to _etext, i.e. to the end of the kernel text area,
 			 * such as __indirect_thunk_end.
 			 */
-			continue;
+			goto next_iter;
 		} else {
 			pr_debug("ERR : %#" PRIx64 ": %s not on kallsyms\n",
 				 mem_start, sym->name);
 		}
 
 		err = -1;
+next_iter:
 	}
 
 	if (verbose <= 0)

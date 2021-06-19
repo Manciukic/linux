@@ -195,8 +195,10 @@ static int process_branch_callback(struct evsel *evsel,
 	if (machine__resolve(machine, &a, sample) < 0)
 		return -1;
 
-	if (a.sym == NULL)
-		return 0;
+	if (a.sym == NULL){
+		ret = 0;
+		goto out;
+	}
 
 	if (a.map != NULL)
 		a.map->dso->hit = 1;
@@ -204,6 +206,7 @@ static int process_branch_callback(struct evsel *evsel,
 	hist__account_cycles(sample->branch_stack, al, sample, false, NULL);
 
 	ret = hist_entry_iter__add(&iter, &a, PERF_MAX_STACK_DEPTH, ann);
+out:
 	return ret;
 }
 

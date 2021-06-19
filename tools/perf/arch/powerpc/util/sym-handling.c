@@ -126,7 +126,7 @@ void arch__post_process_probe_trace_events(struct perf_probe_event *pev,
 
 	map = get_target_map(pev->target, pev->nsi, pev->uprobes);
 	if (!map || map__load(map) < 0)
-		return;
+		goto out;
 
 	for (i = 0; i < ntevs; i++) {
 		tev = &pev->tevs[i];
@@ -137,6 +137,7 @@ void arch__post_process_probe_trace_events(struct perf_probe_event *pev,
 			}
 		}
 	}
+out:
 }
 #endif /* HAVE_LIBELF_SUPPORT */
 

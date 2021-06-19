@@ -712,7 +712,7 @@ static u32 cs_etm__mem_access(struct cs_etm_queue *etmq, u8 trace_chan_id,
 {
 	u8  cpumode;
 	u64 offset;
-	int len;
+	int len = 0;
 	struct thread *thread;
 	struct machine *machine;
 	struct addr_location al;
@@ -735,11 +735,11 @@ static u32 cs_etm__mem_access(struct cs_etm_queue *etmq, u8 trace_chan_id,
 	}
 
 	if (!thread__find_map(thread, cpumode, address, &al) || !al.map->dso)
-		return 0;
+		goto out;
 
 	if (al.map->dso->data.status == DSO_DATA_STATUS_ERROR &&
 	    dso__data_status_seen(al.map->dso, DSO_DATA_STATUS_SEEN_ITRACE))
-		return 0;
+		goto out;
 
 	offset = al.map->map_ip(al.map, address);
 
@@ -748,8 +748,9 @@ static u32 cs_etm__mem_access(struct cs_etm_queue *etmq, u8 trace_chan_id,
 	len = dso__data_read_offset(al.map->dso, machine, offset, buffer, size);
 
 	if (len <= 0)
-		return 0;
+		len = 0;
 
+out:
 	return len;
 }
 
