@@ -2608,8 +2608,11 @@ struct mem_info *mem_info__get(struct mem_info *mi)
 
 void mem_info__put(struct mem_info *mi)
 {
-	if (mi && refcount_dec_and_test(&mi->refcnt))
+	if (mi && refcount_dec_and_test(&mi->refcnt)){
+		map_symbol__zput_members(&mi->iaddr.ms);
+		map_symbol__zput_members(&mi->daddr.ms);
 		free(mi);
+	}
 }
 
 struct mem_info *mem_info__new(void)

@@ -2072,9 +2072,9 @@ static void ip__resolve_ams(struct thread *thread,
 
 	ams->addr = ip;
 	ams->al_addr = al.addr;
-	ams->ms.maps = al.maps;
+	ams->ms.maps = maps__get(al.maps);
 	ams->ms.sym = al.sym;
-	ams->ms.map = al.map;
+	ams->ms.map = map__get(al.map);
 	ams->phys_addr = 0;
 	ams->data_page_size = 0;
 
@@ -2093,9 +2093,9 @@ static void ip__resolve_data(struct thread *thread,
 
 	ams->addr = addr;
 	ams->al_addr = al.addr;
-	ams->ms.maps = al.maps;
+	ams->ms.maps = maps__get(al.maps);
 	ams->ms.sym = al.sym;
-	ams->ms.map = al.map;
+	ams->ms.map = map__get(al.map);
 	ams->phys_addr = phys_addr;
 	ams->data_page_size = daddr_page_size;
 

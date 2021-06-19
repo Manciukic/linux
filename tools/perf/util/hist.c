@@ -472,8 +472,7 @@ static int hist_entry__init(struct hist_entry *he,
 	}
 
 	if (he->mem_info) {
-		map__get(he->mem_info->iaddr.ms.map);
-		map__get(he->mem_info->daddr.ms.map);
+		mem_info__get(he->mem_info);
 	}
 
 	if (hist_entry__has_callchains(he) && symbol_conf.use_callchain)
@@ -521,8 +520,7 @@ err_infos:
 		zfree(&he->branch_info);
 	}
 	if (he->mem_info) {
-		map__put(he->mem_info->iaddr.ms.map);
-		map__put(he->mem_info->daddr.ms.map);
+		mem_info__put(he->mem_info);
 	}
 err:
 	map__zput(he->ms.map);
@@ -1318,8 +1316,6 @@ void hist_entry__delete(struct hist_entry *he)
 	}
 
 	if (he->mem_info) {
-		map__zput(he->mem_info->iaddr.ms.map);
-		map__zput(he->mem_info->daddr.ms.map);
 		mem_info__zput(he->mem_info);
 	}
 
