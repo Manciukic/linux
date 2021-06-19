@@ -793,7 +793,6 @@ static int machine__process_ksymbol_register(struct machine *machine,
 		map->start = event->ksymbol.addr;
 		map->end = map->start + event->ksymbol.len;
 		maps__insert(&machine->kmaps, map);
-		map__put(map);
 		dso__set_loaded(dso);
 
 		if (is_bpf_image(event->ksymbol.name)) {
@@ -814,6 +813,7 @@ static int machine__process_ksymbol_register(struct machine *machine,
 
 	ret = 0;
 out:
+	map__put(map);
 	return ret;
 }
 
@@ -836,6 +836,7 @@ static int machine__process_ksymbol_unregister(struct machine *machine,
 			dso__delete_symbol(map->dso, sym);
 	}
 
+	map__put(map);
 	return 0;
 }
 
@@ -890,6 +891,7 @@ int machine__process_text_poke(struct machine *machine, union perf_event *event,
 			 event->text_poke.addr);
 	}
 
+	map__put(map);
 	return 0;
 }
 
@@ -1163,6 +1165,8 @@ int machine__map_x86_64_entry_trampolines(struct machine *machine,
 		if (dest_map != map)
 			map->pgoff = dest_map->map_ip(dest_map, map->pgoff);
 		found = true;
+		
+		map__put(dest_map);
 	}
 	if (found || machine->trampolines_mapped)
 		return 0;

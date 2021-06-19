@@ -214,8 +214,10 @@ next_iter:
 		mem_end = vmlinux_map->unmap_ip(vmlinux_map, map->end);
 
 		pair = maps__find(&kallsyms.kmaps, mem_start);
-		if (pair == NULL || pair->priv)
+		if (pair == NULL || pair->priv){
+			map__put(pair);
 			continue;
+		}
 
 		if (pair->start == mem_start) {
 			if (!header_printed) {
@@ -231,6 +233,8 @@ next_iter:
 			pr_info(" %s\n", pair->dso->name);
 			pair->priv = 1;
 		}
+
+		map__put(pair);
 	}
 
 	header_printed = false;

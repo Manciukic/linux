@@ -476,6 +476,7 @@ size_t perf_event__fprintf_text_poke(union perf_event *event, struct machine *ma
 			if (al.sym)
 				ret += symbol__fprintf_symname_offs(al.sym, &al, fp);
 		}
+		map__put(al.map); 
 	}
 	ret += fprintf(fp, " old len %u new len %u\n", tp->old_len, tp->new_len);
 	old = true;
@@ -595,6 +596,7 @@ struct map *thread__find_map(struct thread *thread, u8 cpumode, u64 addr,
 	}
 
 	al->map = maps__find(maps, al->addr);
+	map__put(al->map); // TODO next patch: keep status quo in this patch
 	if (al->map != NULL) {
 		/*
 		 * Kernel maps might be changed when loading symbols so loading

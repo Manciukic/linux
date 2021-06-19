@@ -888,6 +888,9 @@ static void __maps__insert(struct maps *maps, struct map *map)
 	map__get(map);
 }
 
+/**
+ * Acquires a refcount on maps, which should be decreased by the caller
+ */
 struct map *maps__find(struct maps *maps, u64 ip)
 {
 	struct rb_node *p;
@@ -908,6 +911,7 @@ struct map *maps__find(struct maps *maps, u64 ip)
 
 	m = NULL;
 out:
+	map__get(m);
 	up_read(&maps->lock);
 	return m;
 }

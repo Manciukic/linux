@@ -62,6 +62,7 @@ static int machine__process_bpf_event_load(struct machine *machine,
 			map->dso->bpf_prog.id = id;
 			map->dso->bpf_prog.sub_id = i;
 			map->dso->bpf_prog.env = env;
+			map__put(map);
 		}
 	}
 	return 0;
