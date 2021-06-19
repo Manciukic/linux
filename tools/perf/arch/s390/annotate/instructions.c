@@ -7,7 +7,7 @@ static int s390_call__parse(struct arch *arch, struct ins_operands *ops,
 	char *endptr, *tok, *name;
 	struct map *map = ms->map;
 	struct addr_map_symbol target = {
-		.ms = { .map = map, },
+		.ms = { .map = map__get(map), },
 	};
 
 	tok = strchr(ops->raw, ',');
@@ -42,6 +42,7 @@ static int s390_call__parse(struct arch *arch, struct ins_operands *ops,
 	    map__rip_2objdump(target.ms.map, map->map_ip(target.ms.map, target.addr)) == ops->target.addr)
 		ops->target.sym = target.ms.sym;
 
+	map__put(target.ms.map);
 	return 0;
 }
 

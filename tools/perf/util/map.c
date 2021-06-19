@@ -699,11 +699,16 @@ out:
 	return sym;
 }
 
+/**
+ * Requires a refcount on ams->ms.map, which will be decreased if the map is 
+ * replaced. The new map will have a refcnt to be decreased.
+ */
 int maps__find_ams(struct maps *maps, struct addr_map_symbol *ams)
 {
 	if (ams->addr < ams->ms.map->start || ams->addr >= ams->ms.map->end) {
 		if (maps == NULL)
 			return -1;
+		map__put(ams->ms.map);
 		ams->ms.map = maps__find(maps, ams->addr);
 		if (ams->ms.map == NULL)
 			return -1;
