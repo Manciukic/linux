@@ -27,7 +27,7 @@ static int __cmd_kallsyms(int argc, const char **argv)
 	}
 
 	for (i = 0; i < argc; ++i) {
-		struct map *map;
+		struct map *map = NULL;
 		struct symbol *symbol = machine__find_kernel_symbol_by_name(machine, argv[i], &map);
 
 		if (symbol == NULL) {
@@ -39,6 +39,8 @@ static int __cmd_kallsyms(int argc, const char **argv)
 			symbol->name, map->dso->short_name, map->dso->long_name,
 			map->unmap_ip(map, symbol->start), map->unmap_ip(map, symbol->end),
 			symbol->start, symbol->end);
+
+		map__put(map);
 	}
 
 	machine__delete(machine);

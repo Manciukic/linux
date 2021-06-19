@@ -453,6 +453,7 @@ static int hist_entry__init(struct hist_entry *he,
 	}
 
 	map__get(he->ms.map);
+	maps__get(he->ms.maps);
 
 	if (he->branch_info) {
 		/*
@@ -468,12 +469,13 @@ static int hist_entry__init(struct hist_entry *he,
 		       sizeof(*he->branch_info));
 
 		map__get(he->branch_info->from.ms.map);
+		maps__get(he->branch_info->from.ms.maps);
 		map__get(he->branch_info->to.ms.map);
+		maps__get(he->branch_info->to.ms.maps);
 	}
 
 	if (he->mem_info) {
-		map__get(he->mem_info->iaddr.ms.map);
-		map__get(he->mem_info->daddr.ms.map);
+		mem_info__get(he->mem_info);
 	}
 
 	if (hist_entry__has_callchains(he) && symbol_conf.use_callchain)
@@ -516,16 +518,14 @@ err_rawdata:
 
 err_infos:
 	if (he->branch_info) {
-		map__put(he->branch_info->from.ms.map);
-		map__put(he->branch_info->to.ms.map);
+		branch_info__put_members(he->branch_info);
 		zfree(&he->branch_info);
 	}
 	if (he->mem_info) {
-		map__put(he->mem_info->iaddr.ms.map);
-		map__put(he->mem_info->daddr.ms.map);
+		mem_info__put(he->mem_info);
 	}
 err:
-	map__zput(he->ms.map);
+	map_symbol__zput_members(&he->ms);
 	zfree(&he->stat_acc);
 	return -ENOMEM;
 }
@@ -925,8 +925,10 @@ iter_next_branch_entry(struct hist_entry_iter *iter, struct addr_location *al)
 	if (iter->curr >= iter->total)
 		return 0;
 
-	al->maps = bi[i].to.ms.maps;
-	al->map = bi[i].to.ms.map;
+	maps__put(al->maps);
+	map__put(al->map);
+	al->maps = maps__get(bi[i].to.ms.maps);
+	al->map = map__get(bi[i].to.ms.map);
 	al->sym = bi[i].to.ms.sym;
 	al->addr = bi[i].to.addr;
 	return 1;
@@ -972,6 +974,9 @@ static int
 iter_finish_branch_entry(struct hist_entry_iter *iter,
 			 struct addr_location *al __maybe_unused)
 {
+	struct branch_info *bi = iter->priv;
+
+	branch_info__put_members(bi);
 	zfree(&iter->priv);
 	iter->he = NULL;
 
@@ -1305,19 +1310,16 @@ void hist_entry__delete(struct hist_entry *he)
 	struct hist_entry_ops *ops = he->ops;
 
 	thread__zput(he->thread);
-	map__zput(he->ms.map);
+	map_symbol__put_members(&he->ms);
 
 	if (he->branch_info) {
-		map__zput(he->branch_info->from.ms.map);
-		map__zput(he->branch_info->to.ms.map);
+		branch_info__put_members(he->branch_info);
 		free_srcline(he->branch_info->srcline_from);
 		free_srcline(he->branch_info->srcline_to);
 		zfree(&he->branch_info);
 	}
 
 	if (he->mem_info) {
-		map__zput(he->mem_info->iaddr.ms.map);
-		map__zput(he->mem_info->daddr.ms.map);
 		mem_info__zput(he->mem_info);
 	}
 
@@ -2671,6 +2673,7 @@ void hist__account_cycles(struct branch_stack *bs, struct addr_location *al,
 				if (total_cycles)
 					*total_cycles += bi[i].flags.cycles;
 			}
+			branch_info__zput_members(bi);
 			free(bi);
 		}
 	}

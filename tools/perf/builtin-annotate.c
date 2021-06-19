@@ -149,6 +149,7 @@ static void process_branch_stack(struct branch_stack *bs, struct addr_location *
 		prev = &bi[i].to;
 	}
 
+	branch_info__zput_members(bi);
 	free(bi);
 }
 
@@ -195,8 +196,10 @@ static int process_branch_callback(struct evsel *evsel,
 	if (machine__resolve(machine, &a, sample) < 0)
 		return -1;
 
-	if (a.sym == NULL)
-		return 0;
+	if (a.sym == NULL){
+		ret = 0;
+		goto out;
+	}
 
 	if (a.map != NULL)
 		a.map->dso->hit = 1;
@@ -204,6 +207,8 @@ static int process_branch_callback(struct evsel *evsel,
 	hist__account_cycles(sample->branch_stack, al, sample, false, NULL);
 
 	ret = hist_entry_iter__add(&iter, &a, PERF_MAX_STACK_DEPTH, ann);
+out:
+	addr_location__put_members(&a);
 	return ret;
 }
 
@@ -282,7 +287,7 @@ static int process_sample_event(struct perf_tool *tool,
 		ret = -1;
 	}
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 }
 

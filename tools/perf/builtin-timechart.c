@@ -535,9 +535,10 @@ static const char *cat_backtrace(union perf_event *event,
 			fprintf(f, "..... %016" PRIx64 " %s\n", ip, tal.sym->name);
 		else
 			fprintf(f, "..... %016" PRIx64 "\n", ip);
+		addr_location__put_members(&tal);
 	}
 exit_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 exit:
 	fclose(f);
 

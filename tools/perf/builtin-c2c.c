@@ -268,6 +268,8 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 	struct mem_info *mi, *mi_dup;
 	int ret;
 
+	memset(&al, 0, sizeof(al));
+
 	if (machine__resolve(machine, &al, sample) < 0) {
 		pr_debug("problem processing %d event, skipping it.\n",
 			 event->header.type);
@@ -350,7 +352,7 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 	}
 
 out:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 
 free_mi:

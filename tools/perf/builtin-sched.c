@@ -2645,6 +2645,8 @@ out:
 
 	evsel__save_time(evsel, sample->time, sample->cpu);
 
+	addr_location__put_members(&al);
+
 	return rc;
 }
 

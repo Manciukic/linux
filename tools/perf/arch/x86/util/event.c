@@ -28,6 +28,7 @@ int perf_event__synthesize_extra_kmaps(struct perf_tool *tool,
 		return -1;
 	}
 
+	down_read(&kmaps->lock);
 	maps__for_each_entry(kmaps, pos) {
 		struct kmap *kmap;
 		size_t size;
@@ -69,6 +70,7 @@ int perf_event__synthesize_extra_kmaps(struct perf_tool *tool,
 			break;
 		}
 	}
+	up_read(&kmaps->lock);
 
 	free(event);
 	return rc;

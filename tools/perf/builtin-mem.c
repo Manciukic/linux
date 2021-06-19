@@ -233,7 +233,7 @@ dump_raw_samples(struct perf_tool *tool,
 		al.map ? (al.map->dso ? al.map->dso->long_name : "???") : "???",
 		al.sym ? al.sym->name : "???");
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return 0;
 }
 

@@ -387,6 +387,8 @@ static u64 find_callsite(struct evsel *evsel, struct perf_sample *sample)
 	struct machine *machine = &kmem_session->machines.host;
 	struct callchain_cursor_node *node;
 
+	memset(&al, 0, sizeof(al));
+
 	if (alloc_func_list == NULL) {
 		if (build_alloc_func_list() < 0)
 			goto out;
@@ -394,6 +396,7 @@ static u64 find_callsite(struct evsel *evsel, struct perf_sample *sample)
 
 	al.thread = machine__findnew_thread(machine, sample->pid, sample->tid);
 	sample__resolve_callchain(sample, &callchain_cursor, NULL, evsel, &al, 16);
+	addr_location__put_members(&al);
 
 	callchain_cursor_commit(&callchain_cursor);
 	while (true) {
@@ -999,7 +1002,7 @@ static void __print_slab_result(struct rb_root *root,
 		struct alloc_stat *data = rb_entry(next, struct alloc_stat,
 						   node);
 		struct symbol *sym = NULL;
-		struct map *map;
+		struct map *map = NULL;
 		char buf[BUFSIZ];
 		u64 addr;
 
@@ -1026,6 +1029,7 @@ static void __print_slab_result(struct rb_root *root,
 		       (unsigned long)data->pingpong,
 		       fragmentation(data->bytes_req, data->bytes_alloc));
 
+		map__put(map);
 		next = rb_next(next);
 	}
 
@@ -1082,6 +1086,7 @@ static void __print_page_alloc_result(struct perf_session *session, int n_lines)
 		       migrate_type_str[data->migrate_type],
 		       gfp_len, compact_gfp_string(data->gfp_flags), caller);
 
+		map__put(map);
 		next = rb_next(next);
 	}
 
@@ -1124,6 +1129,7 @@ static void __print_page_caller_result(struct perf_session *session, int n_lines
 		       migrate_type_str[data->migrate_type],
 		       gfp_len, compact_gfp_string(data->gfp_flags), caller);
 
+		map__put(map);
 		next = rb_next(next);
 	}
 

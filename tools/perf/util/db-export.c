@@ -396,15 +396,20 @@ int db_export__sample(struct db_export *dbe, union perf_event *event,
 		thread__resolve(thread, &addr_al, sample);
 		err = db_ids_from_al(dbe, &addr_al, &es.addr_dso_db_id,
 				     &es.addr_sym_db_id, &es.addr_offset);
-		if (err)
+		if (err){
+			addr_location__put_members(&addr_al);
 			goto out_put;
+		}
 		if (dbe->crp) {
 			err = thread_stack__process(thread, comm, sample, al,
 						    &addr_al, es.db_id,
 						    dbe->crp);
-			if (err)
+			if (err){
+				addr_location__put_members(&addr_al);
 				goto out_put;
+			}
 		}
+		addr_location__put_members(&addr_al);
 	}
 
 	if (dbe->export_sample)

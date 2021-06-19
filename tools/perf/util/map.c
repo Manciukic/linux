@@ -192,6 +192,8 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 			if (!(prot & PROT_EXEC))
 				dso__set_loaded(dso);
 		}
+
+		nsinfo__put(dso->nsinfo);
 		dso->nsinfo = nsi;
 
 		if (build_id__is_defined(bid))
@@ -648,17 +650,20 @@ void maps__put(struct maps *maps)
 		maps__delete(maps);
 }
 
+/**
+ * Acquires a refcount on map, which should be decreased by the caller.
+ */
 struct symbol *maps__find_symbol(struct maps *maps, u64 addr, struct map **mapp)
 {
 	struct map *map = maps__find(maps, addr);
 
 	/* Ensure map is loaded before using map->map_ip */
 	if (map != NULL && map__load(map) >= 0) {
-		if (mapp != NULL)
-			*mapp = map;
+		*mapp = map;
 		return map__find_symbol(map, map->map_ip(map, addr));
 	}
 
+	map__put(map);
 	return NULL;
 }
 
@@ -669,6 +674,9 @@ static bool map__contains_symbol(struct map *map, struct symbol *sym)
 	return ip >= map->start && ip < map->end;
 }
 
+/**
+ * Acquires a refcount on map, which should be decreased by the caller.
+ */
 struct symbol *maps__find_symbol_by_name(struct maps *maps, const char *name, struct map **mapp)
 {
 	struct symbol *sym;
@@ -686,7 +694,7 @@ struct symbol *maps__find_symbol_by_name(struct maps *maps, const char *name, st
 			continue;
 		}
 		if (mapp != NULL)
-			*mapp = pos;
+			*mapp = map__get(pos);
 		goto out;
 	}
 
@@ -696,11 +704,16 @@ out:
 	return sym;
 }
 
+/**
+ * Requires a refcount on ams->ms.map, which will be decreased if the map is 
+ * replaced. The new map will have a refcnt to be decreased.
+ */
 int maps__find_ams(struct maps *maps, struct addr_map_symbol *ams)
 {
 	if (ams->addr < ams->ms.map->start || ams->addr >= ams->ms.map->end) {
 		if (maps == NULL)
 			return -1;
+		map__put(ams->ms.map);
 		ams->ms.map = maps__find(maps, ams->addr);
 		if (ams->ms.map == NULL)
 			return -1;
@@ -888,6 +901,9 @@ static void __maps__insert(struct maps *maps, struct map *map)
 	map__get(map);
 }
 
+/**
+ * Acquires a refcount on maps, which should be decreased by the caller
+ */
 struct map *maps__find(struct maps *maps, u64 ip)
 {
 	struct rb_node *p;
@@ -908,11 +924,12 @@ struct map *maps__find(struct maps *maps, u64 ip)
 
 	m = NULL;
 out:
+	map__get(m);
 	up_read(&maps->lock);
 	return m;
 }
 
-struct map *maps__first(struct maps *maps)
+struct map *__maps__first(struct maps *maps)
 {
 	struct rb_node *first = rb_first(&maps->entries);
 
@@ -921,7 +938,20 @@ struct map *maps__first(struct maps *maps)
 	return NULL;
 }
 
-static struct map *__map__next(struct map *map)
+struct map *maps__first(struct maps *maps)
+{
+	struct map *first;
+	
+	down_read(&maps->lock);
+
+	first = __maps__first(maps);
+
+	up_read(&maps->lock);
+
+	return first;
+}
+
+static struct map *____map__next(struct map *map)
 {
 	struct rb_node *next = rb_next(&map->rb_node);
 
@@ -930,9 +960,9 @@ static struct map *__map__next(struct map *map)
 	return NULL;
 }
 
-struct map *map__next(struct map *map)
+struct map *__map__next(struct map *map)
 {
-	return map ? __map__next(map) : NULL;
+	return map ? ____map__next(map) : NULL;
 }
 
 struct kmap *__map__kmap(struct map *map)

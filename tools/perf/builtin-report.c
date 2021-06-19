@@ -316,7 +316,7 @@ static int process_sample_event(struct perf_tool *tool,
 	if (ret < 0)
 		pr_debug("problem adding hist entry, skipping event\n");
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 }
 
@@ -792,6 +792,7 @@ static size_t maps__fprintf_task(struct maps *maps, int indent, FILE *fp)
 	size_t printed = 0;
 	struct map *map;
 
+	down_read(&maps->lock);
 	maps__for_each_entry(maps, map) {
 		printed += fprintf(fp, "%*s  %" PRIx64 "-%" PRIx64 " %c%c%c%c %08" PRIx64 " %" PRIu64 " %s\n",
 				   indent, "", map->start, map->end,
@@ -802,6 +803,7 @@ static size_t maps__fprintf_task(struct maps *maps, int indent, FILE *fp)
 				   map->pgoff,
 				   map->dso->id.ino, map->dso->name);
 	}
+	up_read(&maps->lock);
 
 	return printed;
 }
@@ -1167,6 +1169,8 @@ int cmd_report(int argc, const char **argv)
 		.annotation_opts	 = annotation__default_options,
 		.skip_empty		 = true,
 	};
+	char *sort_order_help = sort_help("sort by key(s):");
+	char *field_order_help = sort_help("output field(s): overhead period sample ");
 	const struct option options[] = {
 	OPT_STRING('i', "input", &input_name, "file",
 		    "input file name"),
@@ -1201,9 +1205,9 @@ int cmd_report(int argc, const char **argv)
 	OPT_BOOLEAN(0, "header-only", &report.header_only,
 		    "Show only data header."),
 	OPT_STRING('s', "sort", &sort_order, "key[,key2...]",
-		   sort_help("sort by key(s):")),
+		   sort_order_help),
 	OPT_STRING('F', "fields", &field_order, "key[,keys...]",
-		   sort_help("output field(s): overhead period sample ")),
+		   field_order_help),
 	OPT_BOOLEAN(0, "show-cpu-utilization", &symbol_conf.show_cpu_utilization,
 		    "Show sample percentage for different cpu modes"),
 	OPT_BOOLEAN_FLAG(0, "showcpuutilization", &symbol_conf.show_cpu_utilization,
@@ -1336,11 +1340,11 @@ int cmd_report(int argc, const char **argv)
 	char sort_tmp[128];
 
 	if (ret < 0)
-		return ret;
+		goto exit;
 
 	ret = perf_config(report__config, &report);
 	if (ret)
-		return ret;
+		goto exit;
 
 	argc = parse_options(argc, argv, options, report_usage, 0);
 	if (argc) {
@@ -1354,8 +1358,10 @@ int cmd_report(int argc, const char **argv)
 		report.symbol_filter_str = argv[0];
 	}
 
-	if (annotate_check_args(&report.annotation_opts) < 0)
-		return -EINVAL;
+	if (annotate_check_args(&report.annotation_opts) < 0){
+		ret = -EINVAL;
+		goto exit;
+	}
 
 	if (report.mmaps_mode)
 		report.tasks_mode = true;
@@ -1369,12 +1375,14 @@ int cmd_report(int argc, const char **argv)
 	if (symbol_conf.vmlinux_name &&
 	    access(symbol_conf.vmlinux_name, R_OK)) {
 		pr_err("Invalid file: %s\n", symbol_conf.vmlinux_name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto exit;
 	}
 	if (symbol_conf.kallsyms_name &&
 	    access(symbol_conf.kallsyms_name, R_OK)) {
 		pr_err("Invalid file: %s\n", symbol_conf.kallsyms_name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto exit;
 	}
 
 	if (report.inverted_callchain)
@@ -1398,12 +1406,14 @@ int cmd_report(int argc, const char **argv)
 
 repeat:
 	session = perf_session__new(&data, false, &report.tool);
-	if (IS_ERR(session))
-		return PTR_ERR(session);
+	if (IS_ERR(session)){
+		ret = PTR_ERR(session);
+		goto exit;
+	}
 
 	ret = evswitch__init(&report.evswitch, session->evlist, stderr);
 	if (ret)
-		return ret;
+		goto exit;
 
 	if (zstd_init(&(session->zstd_data), 0) < 0)
 		pr_warning("Decompression initialization failed. Reported data may be incomplete.\n");
@@ -1640,5 +1650,8 @@ error:
 	zstd_fini(&(session->zstd_data));
 	evlist__delete(session->evlist);
 	perf_session__delete(session);
+exit:
+	free(sort_order_help);
+	free(field_order_help);
 	return ret;
 }

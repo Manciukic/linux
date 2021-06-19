@@ -120,7 +120,7 @@ static struct ref_reloc_sym *kernel_get_ref_reloc_sym(struct map **pmap)
 		return NULL;
 
 	if (pmap)
-		*pmap = map;
+		*pmap = map__get(map);
 
 	return kmap->ref_reloc_sym;
 }
@@ -131,6 +131,7 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 	struct ref_reloc_sym *reloc_sym;
 	struct symbol *sym;
 	struct map *map;
+	int ret;
 
 	/* ref_reloc_sym is just a label. Need a special fix*/
 	reloc_sym = kernel_get_ref_reloc_sym(&map);
@@ -138,14 +139,20 @@ static int kernel_get_symbol_address_by_name(const char *name, u64 *addr,
 		*addr = (!map->reloc || reloc) ? reloc_sym->addr :
 			reloc_sym->unrelocated_addr;
 	else {
+		map__put(map);
 		sym = machine__find_kernel_symbol_by_name(host_machine, name, &map);
-		if (!sym)
-			return -ENOENT;
+		if (!sym){
+			ret = -ENOENT;
+			goto out;
+		}
 		*addr = map->unmap_ip(map, sym->start) -
 			((reloc) ? 0 : map->reloc) -
 			((reladdr) ? map->start : 0);
 	}
-	return 0;
+	ret = 0;
+out:
+	map__put(map);
+	return ret;
 }
 
 static struct map *kernel_get_module_map(const char *module)
@@ -162,15 +169,19 @@ static struct map *kernel_get_module_map(const char *module)
 		return map__get(pos);
 	}
 
+	down_read(&maps->lock);
 	maps__for_each_entry(maps, pos) {
 		/* short_name is "[module]" */
 		if (strncmp(pos->dso->short_name + 1, module,
 			    pos->dso->short_name_len - 2) == 0 &&
-		    module[pos->dso->short_name_len - 2] == '\0') {
-			return map__get(pos);
-		}
+		    module[pos->dso->short_name_len - 2] == '\0')
+			goto out;
 	}
-	return NULL;
+	pos = NULL;
+out:
+	map__get(pos);
+	up_read(&maps->lock);
+	return pos;
 }
 
 struct map *get_target_map(const char *target, struct nsinfo *nsi, bool user)
@@ -180,8 +191,10 @@ struct map *get_target_map(const char *target, struct nsinfo *nsi, bool user)
 		struct map *map;
 
 		map = dso__new_map(target);
-		if (map && map->dso)
+		if (map && map->dso){
+			nsinfo__put(map->dso->nsinfo);
 			map->dso->nsinfo = nsinfo__get(nsi);
+		}
 		return map;
 	} else {
 		return kernel_get_module_map(target);
@@ -839,8 +852,10 @@ post_process_kernel_probe_trace_events(struct probe_trace_event *tevs,
 			skipped++;
 		} else {
 			tmp = strdup(reloc_sym->name);
-			if (!tmp)
-				return -ENOMEM;
+			if (!tmp){
+				skipped = -ENOMEM;
+				goto out;
+			}
 		}
 		/* If we have no realname, use symbol for it */
 		if (!tevs[i].point.realname)
@@ -852,6 +867,8 @@ post_process_kernel_probe_trace_events(struct probe_trace_event *tevs,
 			(map->reloc ? reloc_sym->unrelocated_addr :
 				      reloc_sym->addr);
 	}
+out:
+	map__put(map);
 	return skipped;
 }
 
@@ -2980,7 +2997,7 @@ void __weak arch__fix_tev_from_maps(struct perf_probe_event *pev __maybe_unused,
 static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 					    struct probe_trace_event **tevs)
 {
-	struct map *map = NULL;
+	struct map *map = NULL, *reloc_sym_map = NULL;
 	struct ref_reloc_sym *reloc_sym = NULL;
 	struct symbol *sym;
 	struct symbol **syms = NULL;
@@ -3023,7 +3040,7 @@ static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 	/* Note that the symbols in the kmodule are not relocated */
 	if (!pev->uprobes && !pev->target &&
 			(!pp->retprobe || kretprobe_offset_is_supported())) {
-		reloc_sym = kernel_get_ref_reloc_sym(NULL);
+		reloc_sym = kernel_get_ref_reloc_sym(&reloc_sym_map);
 		if (!reloc_sym) {
 			pr_warning("Relocated base symbol is not found!\n");
 			ret = -EINVAL;
@@ -3128,6 +3145,7 @@ static int find_probe_trace_events_from_map(struct perf_probe_event *pev,
 
 out:
 	map__put(map);
+	map__put(reloc_sym_map);
 	free(syms);
 	return ret;
 

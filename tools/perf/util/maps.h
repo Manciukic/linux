@@ -17,13 +17,18 @@ struct thread;
 
 struct map *maps__find(struct maps *maps, u64 addr);
 struct map *maps__first(struct maps *maps);
-struct map *map__next(struct map *map);
+/* same as maps__first, but without reader lock. Used in for_each macros. */ 
+struct map *__maps__first(struct maps *maps); 
+/* requires lock on parent maps. Used in for_each macros.*/
+struct map *__map__next(struct map *map);
 
+/* requires maps->lock */ 
 #define maps__for_each_entry(maps, map) \
-	for (map = maps__first(maps); map; map = map__next(map))
+	for (map = __maps__first(maps); map; map = __map__next(map))
 
+/* requires maps->lock */ 
 #define maps__for_each_entry_safe(maps, map, next) \
-	for (map = maps__first(maps), next = map__next(map); map; map = next, next = map__next(map))
+	for (map = __maps__first(maps), next = __map__next(map); map; map = next, next = __map__next(map))
 
 struct maps {
 	struct rb_root      entries;
@@ -83,5 +88,13 @@ struct map *maps__find_by_name(struct maps *maps, const char *name);
 int maps__merge_in(struct maps *kmaps, struct map *new_map);
 
 void __maps__sort_by_name(struct maps *maps);
+
+static inline void __maps__zput(struct maps **maps)
+{
+	maps__put(*maps);
+	*maps = NULL;
+}
+
+#define maps__zput(maps) __maps__zput(&maps)
 
 #endif // __PERF_MAPS_H

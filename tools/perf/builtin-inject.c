@@ -358,9 +358,10 @@ static struct dso *findnew_dso(int pid, int tid, const char *filename,
 		dso = machine__findnew_dso_id(machine, filename, id);
 	}
 
-	if (dso)
+	if (dso){
+		nsinfo__put(dso->nsinfo);
 		dso->nsinfo = nsi;
-	else
+	} else
 		nsinfo__put(nsi);
 
 	thread__put(thread);
@@ -577,6 +578,7 @@ int perf_event__inject_buildid(struct perf_tool *tool, union perf_event *event,
 		}
 	}
 
+	addr_location__put_members(&al);
 	thread__put(thread);
 repipe:
 	perf_event__repipe(tool, event, sample, machine);

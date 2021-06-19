@@ -845,7 +845,7 @@ static void perf_event__process_sample(struct perf_tool *tool,
 		pthread_mutex_unlock(&hists->lock);
 	}
 
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 }
 
 static void

@@ -61,6 +61,8 @@ int build_id__mark_dso_hit(struct perf_tool *tool __maybe_unused,
 	if (thread__find_map(thread, sample->cpumode, sample->ip, &al))
 		al.map->dso->hit = 1;
 
+
+	addr_location__put_members(&al);
 	thread__put(thread);
 	return 0;
 }

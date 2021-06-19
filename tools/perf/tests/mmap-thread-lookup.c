@@ -203,6 +203,7 @@ static int mmap_events(synth_cb synth)
 		}
 
 		pr_debug("map %p, addr %" PRIx64 "\n", al.map, al.map->start);
+		addr_location__put_members(&al);
 	}
 
 	machine__delete_threads(machine);

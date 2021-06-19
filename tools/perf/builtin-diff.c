@@ -461,7 +461,7 @@ static int diff__process_sample_event(struct perf_tool *tool,
 		hists->stats.total_non_filtered_period += sample->period;
 	ret = 0;
 out_put:
-	addr_location__put(&al);
+	addr_location__put_members(&al);
 	return ret;
 }
 

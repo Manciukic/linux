@@ -768,6 +768,8 @@ static int maps__split_kallsyms_for_kcore(struct maps *kmaps, struct dso *dso)
 		if (pos->end)
 			pos->end -= curr_map->start - curr_map->pgoff;
 		symbols__insert(&curr_map->dso->symbols, pos);
+
+		map__put(curr_map);
 		++count;
 	}
 
@@ -1090,6 +1092,7 @@ static int do_validate_kcore_modules(const char *filename, struct maps *kmaps)
 	if (err)
 		return err;
 
+	down_read(&kmaps->lock);
 	maps__for_each_entry(kmaps, old_map) {
 		struct module_info *mi;
 
@@ -1105,6 +1108,7 @@ static int do_validate_kcore_modules(const char *filename, struct maps *kmaps)
 		}
 	}
 out:
+	up_read(&kmaps->lock);
 	delete_modules(&modules);
 	return err;
 }
@@ -2606,8 +2610,11 @@ struct mem_info *mem_info__get(struct mem_info *mi)
 
 void mem_info__put(struct mem_info *mi)
 {
-	if (mi && refcount_dec_and_test(&mi->refcnt))
+	if (mi && refcount_dec_and_test(&mi->refcnt)){
+		map_symbol__zput_members(&mi->iaddr.ms);
+		map_symbol__zput_members(&mi->daddr.ms);
 		free(mi);
+	}
 }
 
 struct mem_info *mem_info__new(void)

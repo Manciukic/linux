@@ -769,6 +769,7 @@ static int machine__process_ksymbol_register(struct machine *machine,
 {
 	struct symbol *sym;
 	struct map *map = maps__find(&machine->kmaps, event->ksymbol.addr);
+	int ret;
 
 	if (!map) {
 		struct dso *dso = dso__new(event->ksymbol.name);
@@ -792,7 +793,6 @@ static int machine__process_ksymbol_register(struct machine *machine,
 		map->start = event->ksymbol.addr;
 		map->end = map->start + event->ksymbol.len;
 		maps__insert(&machine->kmaps, map);
-		map__put(map);
 		dso__set_loaded(dso);
 
 		if (is_bpf_image(event->ksymbol.name)) {
@@ -804,10 +804,17 @@ static int machine__process_ksymbol_register(struct machine *machine,
 	sym = symbol__new(map->map_ip(map, map->start),
 			  event->ksymbol.len,
 			  0, 0, event->ksymbol.name);
-	if (!sym)
-		return -ENOMEM;
+	if (!sym) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
 	dso__insert_symbol(map->dso, sym);
-	return 0;
+
+	ret = 0;
+out:
+	map__put(map);
+	return ret;
 }
 
 static int machine__process_ksymbol_unregister(struct machine *machine,
@@ -829,6 +836,7 @@ static int machine__process_ksymbol_unregister(struct machine *machine,
 			dso__delete_symbol(map->dso, sym);
 	}
 
+	map__put(map);
 	return 0;
 }
 
@@ -883,6 +891,7 @@ int machine__process_text_poke(struct machine *machine, union perf_event *event,
 			 event->text_poke.addr);
 	}
 
+	map__put(map);
 	return 0;
 }
 
@@ -1145,6 +1154,7 @@ int machine__map_x86_64_entry_trampolines(struct machine *machine,
 	 * In the vmlinux case, pgoff is a virtual address which must now be
 	 * mapped to a vmlinux offset.
 	 */
+	down_read(&kmaps->lock);
 	maps__for_each_entry(kmaps, map) {
 		struct kmap *kmap = __map__kmap(map);
 		struct map *dest_map;
@@ -1156,7 +1166,11 @@ int machine__map_x86_64_entry_trampolines(struct machine *machine,
 		if (dest_map != map)
 			map->pgoff = dest_map->map_ip(dest_map, map->pgoff);
 		found = true;
+		
+		map__put(dest_map);
 	}
+	up_read(&kmaps->lock);
+
 	if (found || machine->trampolines_mapped)
 		return 0;
 
@@ -1586,7 +1600,7 @@ int machine__create_kernel_maps(struct machine *machine)
 
 	if (end == ~0ULL) {
 		/* update end address of the kernel map using adjacent module address */
-		map = map__next(machine__kernel_map(machine));
+		map = __map__next(machine__kernel_map(machine));
 		if (map)
 			machine__set_kernel_mmap(machine, start, map->start);
 	}
@@ -2061,11 +2075,13 @@ static void ip__resolve_ams(struct thread *thread,
 
 	ams->addr = ip;
 	ams->al_addr = al.addr;
-	ams->ms.maps = al.maps;
+	ams->ms.maps = maps__get(al.maps);
 	ams->ms.sym = al.sym;
-	ams->ms.map = al.map;
+	ams->ms.map = map__get(al.map);
 	ams->phys_addr = 0;
 	ams->data_page_size = 0;
+
+	addr_location__put_members(&al);
 }
 
 static void ip__resolve_data(struct thread *thread,
@@ -2080,11 +2096,13 @@ static void ip__resolve_data(struct thread *thread,
 
 	ams->addr = addr;
 	ams->al_addr = al.addr;
-	ams->ms.maps = al.maps;
+	ams->ms.maps = maps__get(al.maps);
 	ams->ms.sym = al.sym;
-	ams->ms.map = al.map;
+	ams->ms.map = map__get(al.map);
 	ams->phys_addr = phys_addr;
 	ams->data_page_size = daddr_page_size;
+
+	addr_location__put_members(&al);
 }
 
 struct mem_info *sample__resolve_mem(struct perf_sample *sample,
@@ -2146,6 +2164,7 @@ static int add_callchain_ip(struct thread *thread,
 	int nr_loop_iter = 0;
 	u64 iter_cycles = 0;
 	const char *srcline = NULL;
+	int ret;
 
 	al.filtered = 0;
 	al.sym = NULL;
@@ -2186,13 +2205,19 @@ static int add_callchain_ip(struct thread *thread,
 		  symbol__match_regex(al.sym, &ignore_callees_regex)) {
 			/* Treat this symbol as the root,
 			   forgetting its callees. */
+			addr_location__put_members(root_al);
 			*root_al = al;
+			maps__get(root_al->maps);
+			map__get(root_al->map);
+			thread__get(root_al->thread);
 			callchain_cursor_reset(cursor);
 		}
 	}
 
-	if (symbol_conf.hide_unresolved && al.sym == NULL)
-		return 0;
+	if (symbol_conf.hide_unresolved && al.sym == NULL){
+		ret = 0;
+		goto out;
+	}
 
 	if (iter) {
 		nr_loop_iter = iter->nr_loop_iter;
@@ -2203,9 +2228,12 @@ static int add_callchain_ip(struct thread *thread,
 	ms.map = al.map;
 	ms.sym = al.sym;
 	srcline = callchain_srcline(&ms, al.addr);
-	return callchain_cursor_append(cursor, ip, &ms,
+	ret = callchain_cursor_append(cursor, ip, &ms,
 				       branch, flags, nr_loop_iter,
 				       iter_cycles, branch_from, srcline);
+out:
+	addr_location__put_members(&al);
+	return ret;
 }
 
 struct branch_info *sample__resolve_bstack(struct perf_sample *sample,
@@ -3148,7 +3176,7 @@ struct dso *machine__findnew_dso(struct machine *machine, const char *filename)
 char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, char **modp)
 {
 	struct machine *machine = vmachine;
-	struct map *map;
+	struct map *map = NULL;
 	struct symbol *sym = machine__find_kernel_symbol(machine, *addrp, &map);
 
 	if (sym == NULL)
@@ -3156,6 +3184,7 @@ char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, ch
 
 	*modp = __map__is_kmodule(map) ? (char *)map->dso->short_name : NULL;
 	*addrp = map->unmap_ip(map, sym->start);
+	map__put(map);
 	return sym->name;
 }
 

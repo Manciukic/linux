@@ -367,7 +367,13 @@ static int read_unwind_spec_debug_frame(struct dso *dso,
 static struct map *find_map(unw_word_t ip, struct unwind_info *ui)
 {
 	struct addr_location al;
-	return thread__find_map(ui->thread, PERF_RECORD_MISC_USER, ip, &al);
+	struct map *map;
+	
+	map = thread__find_map(ui->thread, PERF_RECORD_MISC_USER, ip, &al);
+
+	map__get(map); // releasing al will release map too
+	addr_location__put_members(&al);
+	return map;
 }
 
 static int
@@ -381,8 +387,10 @@ find_proc_info(unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
 	int ret = -EINVAL;
 
 	map = find_map(ip, ui);
-	if (!map || !map->dso)
-		return -EINVAL;
+	if (!map || !map->dso){
+		ret = -EINVAL;
+		goto out;
+	}
 
 	pr_debug("unwind: find_proc_info dso %s\n", map->dso->name);
 
@@ -417,12 +425,15 @@ find_proc_info(unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
 
 		memset(&di, 0, sizeof(di));
 		if (dwarf_find_debug_frame(0, &di, ip, base, symfile,
-					   map->start, map->end))
-			return dwarf_search_unwind_table(as, ip, &di, pi,
+					   map->start, map->end)){
+			ret = dwarf_search_unwind_table(as, ip, &di, pi,
 							 need_unwind_info, arg);
+			goto out;
+		}
 	}
 #endif
-
+out:
+	map__put(map);
 	return ret;
 }
 
@@ -466,6 +477,7 @@ static int access_dso_mem(struct unwind_info *ui, unw_word_t addr,
 {
 	struct map *map;
 	ssize_t size;
+	int ret = -1;
 
 	map = find_map(addr, ui);
 	if (!map) {
@@ -474,12 +486,15 @@ static int access_dso_mem(struct unwind_info *ui, unw_word_t addr,
 	}
 
 	if (!map->dso)
-		return -1;
+		goto out;
 
 	size = dso__data_read_addr(map->dso, map, ui->machine,
 				   addr, (u8 *) data, sizeof(*data));
 
-	return !(size == sizeof(*data));
+	ret = !(size == sizeof(*data));
+out:
+	map__put(map);
+	return ret;
 }
 
 static int access_mem(unw_addr_space_t __maybe_unused as,
@@ -574,6 +589,7 @@ static int entry(u64 ip, struct thread *thread,
 {
 	struct unwind_entry e;
 	struct addr_location al;
+	int ret;
 
 	e.ms.sym = thread__find_symbol(thread, PERF_RECORD_MISC_USER, ip, &al);
 	e.ip     = ip;
@@ -585,7 +601,10 @@ static int entry(u64 ip, struct thread *thread,
 		 ip,
 		 al.map ? al.map->map_ip(al.map, ip) : (u64) 0);
 
-	return cb(&e, arg);
+	ret = cb(&e, arg);
+
+	addr_location__put_members(&al);
+	return ret;
 }
 
 static void display_error(int err)
