@@ -453,6 +453,7 @@ static int hist_entry__init(struct hist_entry *he,
 	}
 
 	map__get(he->ms.map);
+	maps__get(he->ms.maps);
 
 	if (he->branch_info) {
 		/*
@@ -524,7 +525,7 @@ err_infos:
 		mem_info__put(he->mem_info);
 	}
 err:
-	map__zput(he->ms.map);
+	map_symbol__zput_members(&he->ms);
 	zfree(&he->stat_acc);
 	return -ENOMEM;
 }
@@ -1309,7 +1310,7 @@ void hist_entry__delete(struct hist_entry *he)
 	struct hist_entry_ops *ops = he->ops;
 
 	thread__zput(he->thread);
-	map__zput(he->ms.map);
+	map_symbol__put_members(&he->ms);
 
 	if (he->branch_info) {
 		branch_info__put_members(he->branch_info);
