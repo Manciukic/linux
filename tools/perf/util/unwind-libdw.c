@@ -112,8 +112,8 @@ static int entry(u64 ip, struct unwind_info *ui)
 		return -1;
 
 	e->ip	  = ip;
-	e->ms.maps = al.maps;
-	e->ms.map = al.map;
+	e->ms.maps = maps__get(al.maps);
+	e->ms.map = map__get(al.map);
 	e->ms.sym = al.sym;
 
 	pr_debug("unwind: %s:ip = 0x%" PRIx64 " (0x%" PRIx64 ")\n",
@@ -287,6 +287,10 @@ int unwind__get_entries(unwind_entry_cb_t cb, void *arg,
 			j = ui->idx - i - 1;
 
 		err = ui->entries[j].ip ? ui->cb(&ui->entries[j], ui->arg) : 0;
+	}
+
+	for (i = 0; i < ui->idx; i++){
+		map_symbol__zput_members(ui->entries[i].ms);
 	}
 
  out:
