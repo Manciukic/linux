@@ -912,7 +912,7 @@ out:
 	return m;
 }
 
-struct map *maps__first(struct maps *maps)
+struct map *__maps__first(struct maps *maps)
 {
 	struct rb_node *first = rb_first(&maps->entries);
 
@@ -921,7 +921,20 @@ struct map *maps__first(struct maps *maps)
 	return NULL;
 }
 
-static struct map *__map__next(struct map *map)
+struct map *maps__first(struct maps *maps)
+{
+	struct map *first;
+	
+	down_read(&maps->lock);
+
+	first = __maps__first(maps);
+
+	up_read(&maps->lock);
+
+	return first;
+}
+
+static struct map *____map__next(struct map *map)
 {
 	struct rb_node *next = rb_next(&map->rb_node);
 
@@ -930,9 +943,9 @@ static struct map *__map__next(struct map *map)
 	return NULL;
 }
 
-struct map *map__next(struct map *map)
+struct map *__map__next(struct map *map)
 {
-	return map ? __map__next(map) : NULL;
+	return map ? ____map__next(map) : NULL;
 }
 
 struct kmap *__map__kmap(struct map *map)

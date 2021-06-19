@@ -17,13 +17,16 @@ struct thread;
 
 struct map *maps__find(struct maps *maps, u64 addr);
 struct map *maps__first(struct maps *maps);
-struct map *map__next(struct map *map);
+/* same as maps__first, but without reader lock. Used in for_each macros. */ 
+struct map *__maps__first(struct maps *maps); 
+/* requires lock on parent maps. Used in for_each macros.*/
+struct map *__map__next(struct map *map);
 
 #define maps__for_each_entry(maps, map) \
-	for (map = maps__first(maps); map; map = map__next(map))
+	for (map = __maps__first(maps); map; map = __map__next(map))
 
 #define maps__for_each_entry_safe(maps, map, next) \
-	for (map = maps__first(maps), next = map__next(map); map; map = next, next = map__next(map))
+	for (map = __maps__first(maps), next = __map__next(map); map; map = next, next = __map__next(map))
 
 struct maps {
 	struct rb_root      entries;

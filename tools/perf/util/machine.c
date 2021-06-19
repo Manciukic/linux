@@ -1586,7 +1586,7 @@ int machine__create_kernel_maps(struct machine *machine)
 
 	if (end == ~0ULL) {
 		/* update end address of the kernel map using adjacent module address */
-		map = map__next(machine__kernel_map(machine));
+		map = __map__next(machine__kernel_map(machine));
 		if (map)
 			machine__set_kernel_mmap(machine, start, map->start);
 	}
