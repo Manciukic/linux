@@ -149,6 +149,7 @@ static void process_branch_stack(struct branch_stack *bs, struct addr_location *
 		prev = &bi[i].to;
 	}
 
+	branch_info__zput_members(bi);
 	free(bi);
 }
 
