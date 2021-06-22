@@ -2211,6 +2211,36 @@ static int __perf_session__process_decomp_events(struct perf_session *session)
 }
 
 static int
+reader__init(struct reader *rd, bool *one_mmap)
+{
+	struct reader_state *st = &rd->state;
+	u64 page_offset;
+	char **mmaps = st->mmaps;
+
+	pr_debug("reader processing %s\n", rd->path);
+
+	page_offset = page_size * (rd->data_offset / page_size);
+	st->file_offset = page_offset;
+	st->head = rd->data_offset - page_offset;
+
+	st->data_size = rd->data_size + rd->data_offset;
+
+	st->mmap_size = MMAP_SIZE;
+	if (st->mmap_size > st->data_size) {
+		st->mmap_size = st->data_size;
+		if (one_mmap)
+			*one_mmap = true;
+	}
+
+	memset(mmaps, 0, sizeof(st->mmaps));
+
+	if (zstd_init(&rd->zstd_data, 0))
+		return -1;
+
+	return 0;
+}
+
+static int
 reader__process_events(struct reader *rd, struct perf_session *session,
 		       struct ui_progress *prog)
 {
@@ -2220,25 +2250,6 @@ reader__process_events(struct reader *rd, struct perf_session *session,
 	char *buf, **mmaps = st->mmaps;
 	union perf_event *event;
 	s64 skip;
-
-	page_offset = page_size * (rd->data_offset / page_size);
-	st->file_offset = page_offset;
-	st->head = rd->data_offset - page_offset;
-
-	ui_progress__init_size(prog, rd->data_size, "Processing events...");
-
-	st->data_size = rd->data_size + rd->data_offset;
-
-	st->mmap_size = MMAP_SIZE;
-	if (st->mmap_size > st->data_size) {
-		st->mmap_size = st->data_size;
-		session->one_mmap = true;
-	}
-
-	memset(mmaps, 0, sizeof(st->mmaps));
-
-	if (zstd_init(&rd->zstd_data, 0))
-		return -1;
 
 	mmap_prot  = PROT_READ;
 	mmap_flags = MAP_SHARED;
@@ -2355,6 +2366,9 @@ static int __perf_session__process_events(struct perf_session *session)
 
 	ui_progress__init_size(&prog, rd->data_size, "Processing events...");
 
+	err = reader__init(rd, &session->one_mmap);
+	if (err)
+		goto out_err;
 	err = reader__process_events(rd, session, &prog);
 	if (err)
 		goto out_err;
