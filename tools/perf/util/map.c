@@ -114,6 +114,7 @@ static inline bool replace_android_lib(const char *filename, char *newfilename)
 }
 
 void map__init(struct map *map, u64 start, u64 end, u64 pgoff, struct dso *dso)
+__acquires(&map->refcnt)
 {
 	map->start    = start;
 	map->end      = end;
@@ -125,12 +126,14 @@ void map__init(struct map *map, u64 start, u64 end, u64 pgoff, struct dso *dso)
 	RB_CLEAR_NODE(&map->rb_node);
 	map->erange_warned = false;
 	refcount_set(&map->refcnt, 1);
+	__acquire(&map->refcnt);
 }
 
 struct map *map__new(struct machine *machine, u64 start, u64 len,
 		     u64 pgoff, struct dso_id *id,
 		     u32 prot, u32 flags, struct build_id *bid,
 		     char *filename, struct thread *thread)
+__acquires(&map->refcnt)
 {
 	struct map *map = malloc(sizeof(*map));
 	struct nsinfo *nsi = NULL;
@@ -198,11 +201,14 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 			dso__set_build_id(dso, bid);
 
 		dso__put(dso);
+	} else {
+		__acquire(NULL);
 	}
 	return map;
 out_delete:
 	nsinfo__put(nsi);
 	free(map);
+	__acquire(NULL);
 	return NULL;
 }
 
@@ -212,6 +218,7 @@ out_delete:
  * symbols we'll know where it starts and ends.
  */
 struct map *map__new2(u64 start, struct dso *dso)
+__acquires(&map->refcnt)
 {
 	struct map *map = calloc(1, (sizeof(*map) +
 				     (dso->kernel ? sizeof(struct kmap) : 0)));
@@ -220,6 +227,8 @@ struct map *map__new2(u64 start, struct dso *dso)
 		 * ->end will be filled after we load all the symbols
 		 */
 		map__init(map, start, 0, 0, dso);
+	} else {
+		__acquire(NULL);
 	}
 
 	return map;
@@ -294,7 +303,9 @@ void map__delete(struct map *map)
 }
 
 void map__put(struct map *map)
+__releases(&map->refcnt)
 {
+	__release(&map->refcnt);
 	if (map && refcount_dec_and_test(&map->refcnt))
 		map__delete(map);
 }
@@ -381,6 +392,7 @@ struct symbol *map__find_symbol_by_name(struct map *map, const char *name)
 }
 
 struct map *map__clone(struct map *from)
+__acquires(&map->refcnt)
 {
 	size_t size = sizeof(struct map);
 	struct map *map;
@@ -389,6 +401,7 @@ struct map *map__clone(struct map *from)
 		size += sizeof(struct kmap);
 
 	map = memdup(from, size);
+	__acquire(&map->refcnt);
 	if (map != NULL) {
 		refcount_set(&map->refcnt, 1);
 		RB_CLEAR_NODE(&map->rb_node);
@@ -585,12 +598,14 @@ void maps__insert(struct maps *maps, struct map *map)
 }
 
 static void __maps__remove(struct maps *maps, struct map *map)
+__releases(&maps->refcnt)
 {
 	rb_erase_init(&map->rb_node, &maps->entries);
 	map__put(map);
 }
 
 void maps__remove(struct maps *maps, struct map *map)
+__releases(&maps->refcnt)
 {
 	down_write(&maps->lock);
 	if (maps->last_search_by_name == map)
@@ -610,6 +625,7 @@ static void __maps__purge(struct maps *maps)
 	maps__for_each_entry_safe(maps, pos, next) {
 		rb_erase_init(&pos->rb_node,  &maps->entries);
 		map__put(pos);
+		__acquire(&pos->refcnt);
 	}
 }
 
@@ -643,7 +659,9 @@ void maps__delete(struct maps *maps)
 }
 
 void maps__put(struct maps *maps)
+__releases(&maps->refcnt)
 {
+	__release(&maps->refcnt);
 	if (maps && refcount_dec_and_test(&maps->refcnt))
 		maps__delete(maps);
 }
@@ -763,15 +781,16 @@ int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp)
 
 	next = first;
 	while (next) {
-		struct map *pos = rb_entry(next, struct map, rb_node);
+		struct map *pos = map__get(rb_entry(next, struct map, rb_node));
 		next = rb_next(&pos->rb_node);
 
 		/*
 		 * Stop if current map starts after map->end.
 		 * Maps are ordered by start: next will not overlap for sure.
 		 */
-		if (pos->start >= map->end)
-			break;
+		if (pos->start >= map->end){
+			goto put_map;
+		}
 
 		if (verbose >= 2) {
 
@@ -795,6 +814,7 @@ int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp)
 
 			if (before == NULL) {
 				err = -ENOMEM;
+				__release(&before->refcnt);
 				goto put_map;
 			}
 
@@ -810,6 +830,7 @@ int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp)
 
 			if (after == NULL) {
 				err = -ENOMEM;
+				__release(&after->refcnt);
 				goto put_map;
 			}
 
@@ -850,12 +871,15 @@ int maps__clone(struct thread *thread, struct maps *parent)
 
 		if (new == NULL) {
 			err = -ENOMEM;
+			__release(&new->refcnt);
 			goto out_unlock;
 		}
 
 		err = unwind__prepare_access(maps, new, NULL);
-		if (err)
+		if (err){
+			map__put(new);
 			goto out_unlock;
+		}
 
 		maps__insert(maps, new);
 		map__put(new);
@@ -886,6 +910,7 @@ static void __maps__insert(struct maps *maps, struct map *map)
 	rb_link_node(&map->rb_node, parent, p);
 	rb_insert_color(&map->rb_node, &maps->entries);
 	map__get(map);
+	__release(&map->refcnt);
 }
 
 struct map *maps__find(struct maps *maps, u64 ip)

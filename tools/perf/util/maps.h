@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <linux/types.h>
 #include "rwsem.h"
+#include "debug.h"
 
 struct ref_reloc_sym;
 struct machine;

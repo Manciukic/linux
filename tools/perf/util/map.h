@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <linux/types.h>
+#include "debug.h"
 
 struct dso;
 struct maps;
@@ -101,28 +102,34 @@ struct thread;
 	__map__for_each_symbol_by_name(map, sym_name, (pos))
 
 void map__init(struct map *map,
-	       u64 start, u64 end, u64 pgoff, struct dso *dso);
+	       u64 start, u64 end, u64 pgoff, struct dso *dso) 
+		__acquires(&map->refcnt);
 
 struct dso_id;
 struct build_id;
 
 struct map *map__new(struct machine *machine, u64 start, u64 len,
 		     u64 pgoff, struct dso_id *id, u32 prot, u32 flags,
-		     struct build_id *bid, char *filename, struct thread *thread);
-struct map *map__new2(u64 start, struct dso *dso);
+		     struct build_id *bid, char *filename, struct thread *thread)
+			 __acquires(&map->refcnt);
+struct map *map__new2(u64 start, struct dso *dso) __acquires(&map->refcnt);
 void map__delete(struct map *map);
-struct map *map__clone(struct map *map);
+struct map *map__clone(struct map *map) __acquires(&map->refcnt);
 
 static inline struct map *map__get(struct map *map)
+__acquires(&map->refcnt)
 {
-	if (map)
+	__acquire(&map->refcnt);
+	if (map){
 		refcount_inc(&map->refcnt);
+	}
 	return map;
 }
 
-void map__put(struct map *map);
+void map__put(struct map *map) __releases(&map->refcnt);
 
 static inline void __map__zput(struct map **map)
+__releases(&(*map)->refcnt)
 {
 	map__put(*map);
 	*map = NULL;

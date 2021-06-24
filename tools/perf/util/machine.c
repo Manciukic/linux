@@ -777,9 +777,12 @@ static int machine__process_ksymbol_register(struct machine *machine,
 			dso->kernel = DSO_SPACE__KERNEL;
 			map = map__new2(0, dso);
 			dso__put(dso);
+		} else {
+			__acquire(NULL);
 		}
 
 		if (!dso || !map) {
+			__release(NULL);
 			return -ENOMEM;
 		}
 
