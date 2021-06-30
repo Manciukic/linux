@@ -44,6 +44,7 @@ struct perf_session {
 	struct decomp		*decomp_last;
 	struct reader		*readers;
 	int			nr_readers;
+	struct reader		*active_reader;
 };
 
 struct decomp {
