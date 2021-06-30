@@ -70,7 +70,8 @@ struct reader_state {
 
 enum {
 	READER_EOF	=  0,
-	READER_OK	=  1,
+	READER_NODATA	=  1,
+	READER_OK	=  2,
 };
 
 struct reader {
@@ -2308,7 +2309,7 @@ reader__read_event(struct reader *rd, struct perf_session *session,
 		return PTR_ERR(event);
 
 	if (!event)
-		return READER_EOF;
+		return READER_NODATA;
 
 	session->active_reader = rd;
 	size = event->header.size;
@@ -2398,7 +2399,7 @@ static int __perf_session__process_events(struct perf_session *session)
 		err = reader__read_event(rd, session, &prog);
 		if (err < 0)
 			break;
-		if (err == READER_EOF) {
+		if (err == READER_NODATA) {
 			err = reader__mmap(rd, session);
 			if (err <= 0)
 				break;
@@ -2475,25 +2476,25 @@ static int __perf_session__process_dir_events(struct perf_session *session)
 	readers++;
 
 	for (i = 0; i < data->dir.nr; i++) {
-		if (data->dir.files[i].size) {
-			rd[readers] = (struct reader) {
-				.fd		 = data->dir.files[i].fd,
-				.path		 = data->dir.files[i].path,
-				.data_size	 = data->dir.files[i].size,
-				.data_offset	 = 0,
-				.in_place_update = session->data->in_place_update,
-			};
-			ret = reader__init(&rd[readers], NULL);
-			if (ret)
-				goto out_err;
-			ret = reader__mmap(&rd[readers], session);
-			if (ret != READER_OK) {
-				if (ret == READER_EOF)
-					ret = -EINVAL;
-				goto out_err;
-			}
-			readers++;
+		if (!data->dir.files[i].size)
+			continue;
+		rd[readers] = (struct reader) {
+			.fd		 = data->dir.files[i].fd,
+			.path		 = data->dir.files[i].path,
+			.data_size	 = data->dir.files[i].size,
+			.data_offset	 = 0,
+			.in_place_update = session->data->in_place_update,
+		};
+		ret = reader__init(&rd[readers], NULL);
+		if (ret)
+			goto out_err;
+		ret = reader__mmap(&rd[readers], session);
+		if (ret != READER_OK) {
+			if (ret == READER_EOF)
+				ret = -EINVAL;
+			goto out_err;
 		}
+		readers++;
 	}
 
 	i = 0;
@@ -2510,7 +2511,7 @@ static int __perf_session__process_dir_events(struct perf_session *session)
 		ret = reader__read_event(&rd[i], session, &prog);
 		if (ret < 0)
 			break;
-		if (ret == READER_EOF) {
+		if (ret == READER_NODATA) {
 			ret = reader__mmap(&rd[i], session);
 			if (ret < 0)
 				goto out_err;
