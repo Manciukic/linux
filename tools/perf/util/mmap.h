@@ -47,6 +47,8 @@ struct mmap {
 	struct perf_data_file *file;
 	struct zstd_data      zstd_data;
 	u64		      bytes_written;
+	u64		      bytes_transferred;
+	u64		      bytes_compressed;
 };
 
 struct mmap_params {
