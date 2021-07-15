@@ -297,7 +297,7 @@ err:
 static int iostat_event_group(struct evlist *evl,
 			      struct iio_root_ports_list *list)
 {
-	int ret;
+	int ret = 0;
 	int idx;
 	const char *iostat_cmd_template =
 	"{uncore_iio_%x/event=0x83,umask=0x04,ch_mask=0xF,fc_mask=0x07/,\
