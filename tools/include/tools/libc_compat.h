@@ -6,6 +6,8 @@
 
 #include <stdlib.h>
 #include <linux/overflow.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #ifdef COMPAT_NEED_REALLOCARRAY
 static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
@@ -15,6 +17,13 @@ static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
 	if (unlikely(check_mul_overflow(nmemb, size, &bytes)))
 		return NULL;
 	return realloc(ptr, bytes);
+}
+#endif
+
+#ifndef HAVE_GETTID
+static inline pid_t gettid(void)
+{
+	return (pid_t)syscall(__NR_gettid);
 }
 #endif
 #endif
