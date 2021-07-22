@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-#ifdef COMPAT_NEED_REALLOCARRAY
+#ifndef HAVE_REALLOCARRAY
 static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	size_t bytes;

@@ -122,7 +122,7 @@ do {				\
  * Re-implement glibc's reallocarray() for libbpf internal-only use.
  * reallocarray(), unfortunately, is not available in all versions of glibc,
  * so requires extra feature detection and using reallocarray() stub from
- * <tools/libc_compat.h> and COMPAT_NEED_REALLOCARRAY. All this complicates
+ * <tools/libc_compat.h> and HAVE_REALLOCARRAY. All this complicates
  * build of libbpf unnecessarily and is just a maintenance burden. Instead,
  * it's trivial to implement libbpf-specific internal version and use it
  * throughout libbpf.
