@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <uapi/linux/mman.h> /* To get things like MAP_HUGETLB even on older libc headers */
 #include "dso.h"
 #include "map.h"
@@ -193,8 +194,10 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 				dso__set_loaded(dso);
 		}
 
+		pthread_mutex_lock(&dso->lock);
 		nsinfo__put(dso->nsinfo);
 		dso->nsinfo = nsi;
+		pthread_mutex_unlock(&dso->lock);
 
 		if (build_id__is_defined(bid))
 			dso__set_build_id(dso, bid);

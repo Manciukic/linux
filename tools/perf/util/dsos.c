@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <symbol.h> // filename__read_build_id
+#include <pthread.h>
 
 static int __dso_id__cmp(struct dso_id *a, struct dso_id *b)
 {
@@ -72,7 +73,10 @@ bool __dsos__read_build_ids(struct list_head *head, bool with_hits)
 			have_build_id = true;
 			continue;
 		}
+		// protect nsinfo
+		pthread_mutex_lock(&pos->lock);
 		nsinfo__mountns_enter(pos->nsinfo, &nsc);
+		pthread_mutex_unlock(&pos->lock);
 		if (filename__read_build_id(pos->long_name, &pos->bid) > 0) {
 			have_build_id	  = true;
 			pos->has_build_id = true;

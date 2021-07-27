@@ -34,6 +34,7 @@
 #include <linux/string.h>
 #include <errno.h>
 #include <signal.h>
+#include <pthread.h>
 
 struct perf_inject {
 	struct perf_tool	tool;
@@ -362,8 +363,10 @@ static struct dso *findnew_dso(int pid, int tid, const char *filename,
 	}
 
 	if (dso) {
+		pthread_mutex_lock(&dso->lock);
 		nsinfo__put(dso->nsinfo);
 		dso->nsinfo = nsi;
+		pthread_mutex_unlock(&dso->lock);
 	} else
 		nsinfo__put(nsi);
 
@@ -549,7 +552,10 @@ static int dso__read_build_id(struct dso *dso)
 	if (dso->has_build_id)
 		return 0;
 
+	// protect nsinfo, other fields are safe
+	pthread_mutex_lock(&dso->lock);
 	nsinfo__mountns_enter(dso->nsinfo, &nsc);
+	pthread_mutex_unlock(&dso->lock);
 	if (filename__read_build_id(dso->long_name, &dso->bid) > 0)
 		dso->has_build_id = true;
 	nsinfo__mountns_exit(&nsc);
