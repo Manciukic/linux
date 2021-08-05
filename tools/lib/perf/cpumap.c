@@ -277,14 +277,10 @@ int perf_cpu_map__idx(struct perf_cpu_map *cpus, int cpu)
 
 int perf_cpu_map__max(struct perf_cpu_map *map)
 {
-	int i, max = -1;
-
-	for (i = 0; i < map->nr; i++) {
-		if (map->map[i] > max)
-			max = map->map[i];
-	}
-
-	return max;
+	if (map->nr > 0)
+		return map->map[map->nr-1];
+	else
+		return -1;
 }
 
 /*
