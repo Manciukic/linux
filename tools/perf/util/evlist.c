@@ -341,36 +341,9 @@ static int evlist__nr_threads(struct evlist *evlist, struct evsel *evsel)
 		return perf_thread_map__nr(evlist->core.threads);
 }
 
-void evlist__cpu_iter_start(struct evlist *evlist)
+int evsel__find_cpu(struct evsel *ev, int cpu)
 {
-	struct evsel *pos;
-
-	/*
-	 * Reset the per evsel cpu_iter. This is needed because
-	 * each evsel's cpumap may have a different index space,
-	 * and some operations need the index to modify
-	 * the FD xyarray (e.g. open, close)
-	 */
-	evlist__for_each_entry(evlist, pos)
-		pos->cpu_iter = 0;
-}
-
-bool evsel__cpu_iter_skip_no_inc(struct evsel *ev, int cpu)
-{
-	if (ev->cpu_iter >= ev->core.cpus->nr)
-		return true;
-	if (cpu >= 0 && ev->core.cpus->map[ev->cpu_iter] != cpu)
-		return true;
-	return false;
-}
-
-bool evsel__cpu_iter_skip(struct evsel *ev, int cpu)
-{
-	if (!evsel__cpu_iter_skip_no_inc(ev, cpu)) {
-		ev->cpu_iter++;
-		return false;
-	}
-	return true;
+	return perf_cpu_map__idx(ev->core.cpus, cpu);
 }
 
 static int evsel__strcmp(struct evsel *pos, char *evsel_name)
@@ -400,7 +373,7 @@ static void __evlist__disable(struct evlist *evlist, char *evsel_name)
 {
 	struct evsel *pos;
 	struct affinity affinity;
-	int cpu, i, imm = 0;
+	int cpu, i, imm = 0, cpu_idx;
 	bool has_imm = false;
 
 	if (affinity__setup(&affinity) < 0)
@@ -414,7 +387,8 @@ static void __evlist__disable(struct evlist *evlist, char *evsel_name)
 			evlist__for_each_entry(evlist, pos) {
 				if (evsel__strcmp(pos, evsel_name))
 					continue;
-				if (evsel__cpu_iter_skip(pos, cpu))
+				cpu_idx = evsel__find_cpu(pos, cpu);
+				if (cpu_idx < 0)
 					continue;
 				if (pos->disabled || !evsel__is_group_leader(pos) || !pos->core.fd)
 					continue;
@@ -422,7 +396,7 @@ static void __evlist__disable(struct evlist *evlist, char *evsel_name)
 					has_imm = true;
 				if (pos->immediate != imm)
 					continue;
-				evsel__disable_cpu(pos, pos->cpu_iter - 1);
+				evsel__disable_cpu(pos, cpu_idx);
 			}
 		}
 		if (!has_imm)
@@ -462,7 +436,7 @@ static void __evlist__enable(struct evlist *evlist, char *evsel_name)
 {
 	struct evsel *pos;
 	struct affinity affinity;
-	int cpu, i;
+	int cpu, i, cpu_idx;
 
 	if (affinity__setup(&affinity) < 0)
 		return;
@@ -473,11 +447,12 @@ static void __evlist__enable(struct evlist *evlist, char *evsel_name)
 		evlist__for_each_entry(evlist, pos) {
 			if (evsel__strcmp(pos, evsel_name))
 				continue;
-			if (evsel__cpu_iter_skip(pos, cpu))
+			cpu_idx = evsel__find_cpu(pos, cpu);
+			if (cpu_idx < 0)
 				continue;
 			if (!evsel__is_group_leader(pos) || !pos->core.fd)
 				continue;
-			evsel__enable_cpu(pos, pos->cpu_iter - 1);
+			evsel__enable_cpu(pos, cpu_idx);
 		}
 	}
 	affinity__cleanup(&affinity);
@@ -1264,7 +1239,7 @@ void evlist__close(struct evlist *evlist)
 {
 	struct evsel *evsel;
 	struct affinity affinity;
-	int cpu, i;
+	int cpu, i, cpu_idx;
 
 	/*
 	 * With perf record core.cpus is usually NULL.
@@ -1282,9 +1257,10 @@ void evlist__close(struct evlist *evlist)
 		affinity__set(&affinity, cpu);
 
 		evlist__for_each_entry_reverse(evlist, evsel) {
-			if (evsel__cpu_iter_skip(evsel, cpu))
-			    continue;
-			perf_evsel__close_cpu(&evsel->core, evsel->cpu_iter - 1);
+			cpu_idx = evsel__find_cpu(evsel, cpu);
+			if (cpu_idx < 0)
+				continue;
+			perf_evsel__close_cpu(&evsel->core, cpu_idx);
 		}
 	}
 	affinity__cleanup(&affinity);
