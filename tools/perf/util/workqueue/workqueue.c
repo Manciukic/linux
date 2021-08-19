@@ -39,6 +39,7 @@ struct workqueue_struct {
 	int			msg_pipe[2];	/* main thread comm pipes */
 	struct worker		**workers;	/* array of all workers */
 	struct worker		*next_worker;	/* next worker to choose (round robin) */
+	int			first_stopped_worker; /* next worker to start if needed */
 };
 
 static const char * const workqueue_errno_str[] = {
@@ -423,8 +424,7 @@ out:
  */
 struct workqueue_struct *create_workqueue(int nr_threads)
 {
-	int ret, err = 0, t;
-	struct worker *worker;
+	int ret, err = 0;
 	struct workqueue_struct *wq = zalloc(sizeof(struct workqueue_struct));
 
 	if (!wq) {
@@ -474,24 +474,11 @@ struct workqueue_struct *create_workqueue(int nr_threads)
 		goto out_close_pipe;
 	}
 
-	for (t = 0; t < nr_threads; t++) {
-		err = spinup_worker(wq, t);
-		if (err)
-			goto out_stop_pool;
-	}
-
 	wq->next_worker = NULL;
+	wq->first_stopped_worker = 0;
 
 	return wq;
 
-out_stop_pool:
-	lock_workqueue(wq);
-	for_each_idle_worker(wq, worker) {
-		ret = stop_worker(worker);
-		if (ret)
-			err = ret;
-	}
-	unlock_workqueue(wq);
 out_close_pipe:
 	close(wq->msg_pipe[0]);
 	wq->msg_pipe[0] = -1;
@@ -686,10 +673,28 @@ __releases(&worker->lock)
  */
 int queue_work(struct workqueue_struct *wq, struct work_struct *work)
 {
+	int ret;
 	struct worker *worker;
 
+repeat:
 	lock_workqueue(wq);
 	if (list_empty(&wq->idle_list)) {
+		// find a worker to spin up
+		while (wq->first_stopped_worker < threadpool__size(wq->pool)
+				&& wq->workers[wq->first_stopped_worker])
+			wq->first_stopped_worker++;
+
+		// found one
+		if (wq->first_stopped_worker < threadpool__size(wq->pool)) {
+			// spinup does not hold the lock to make the thread register itself
+			unlock_workqueue(wq);
+			ret = spinup_worker(wq, wq->first_stopped_worker);
+			if (ret)
+				return ret;
+			// worker is now in idle_list
+			goto repeat;
+		}
+
 		worker = wq->next_worker;
 		advance_next_worker(wq);
 	} else {
@@ -705,7 +710,24 @@ int queue_work(struct workqueue_struct *wq, struct work_struct *work)
  */
 int queue_work_on_worker(int tidx, struct workqueue_struct *wq, struct work_struct *work)
 {
+	int ret;
+
 	lock_workqueue(wq);
+	if (!wq->workers[tidx]) {
+		// spinup does not hold the lock to make the thread register itself
+		unlock_workqueue(wq);
+		ret = spinup_worker(wq, tidx);
+		if (ret)
+			return ret;
+
+		// now recheck if worker is available
+		lock_workqueue(wq);
+		if (!wq->workers[tidx]) {
+			unlock_workqueue(wq);
+			return -WORKQUEUE_ERROR__NOTREADY;
+		}
+	}
+
 	lock_worker(wq->workers[tidx]);
 	return __queue_work_on_worker(wq, wq->workers[tidx], work);
 }
