@@ -50,6 +50,7 @@ static const char * const workqueue_errno_str[] = {
 	"Error executing function in threadpool",
 	"Error stopping the threadpool",
 	"Error starting thread in the threadpool",
+	"Error setting affinity in threadpool",
 	"Error sending message to worker",
 	"Error receiving message from worker",
 	"Received unexpected message from worker",
@@ -756,6 +757,26 @@ int flush_workqueue(struct workqueue_struct *wq)
 	unlock_workqueue(wq);
 
 	return err;
+}
+
+/**
+ * workqueue_set_affinities - set affinities to all threads in @wq->pool
+ */
+int workqueue_set_affinities(struct workqueue_struct *wq,
+				struct mmap_cpu_mask *affinities)
+{
+	wq->pool_errno = threadpool__set_affinities(wq->pool, affinities);
+	return wq->pool_errno ? -WORKQUEUE_ERROR__POOLAFFINITY : 0;
+}
+
+/**
+ * workqueue_set_affinities - set affinity to thread @tidx in @wq->pool
+ */
+int workqueue_set_affinity(struct workqueue_struct *wq, int tidx,
+				struct mmap_cpu_mask *affinity)
+{
+	wq->pool_errno = threadpool__set_affinity(wq->pool, tidx, affinity);
+	return wq->pool_errno ? -WORKQUEUE_ERROR__POOLAFFINITY : 0;
 }
 
 /**
