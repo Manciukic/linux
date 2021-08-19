@@ -882,6 +882,37 @@ static int record__mmap(struct record *rec)
 	return record__mmap_evlist(rec, rec->evlist);
 }
 
+struct record_open_custom_fallback {
+	struct evlist_open_custom_fallback fallback;
+	struct record_opts *opts;
+	bool retry;
+};
+
+static bool record__open_fallback(struct evlist_open_custom_fallback *_fallback,
+				struct evlist *evlist, struct evsel *evsel, int err)
+{
+	char msg[BUFSIZ];
+	struct record_open_custom_fallback *fallback = container_of(_fallback,
+		struct record_open_custom_fallback, fallback);
+
+	if (evsel__fallback(evsel, -err, msg, sizeof(msg))) {
+		if (verbose > 0)
+			ui__warning("%s\n", msg);
+		return true;
+	}
+	if ((err == -EINVAL || err == -EBADF) &&
+		evsel->core.leader != &evsel->core &&
+		evsel->weak_group) {
+		evlist__reset_weak_group(evlist, evsel, true);
+		fallback->retry = true;
+		return false;
+	}
+
+	evsel__open_strerror(evsel, &fallback->opts->target, -err, msg, sizeof(msg));
+	ui__error("%s\n", msg);
+	return false;
+}
+
 static int record__open(struct record *rec)
 {
 	char msg[BUFSIZ];
@@ -890,6 +921,12 @@ static int record__open(struct record *rec)
 	struct perf_session *session = rec->session;
 	struct record_opts *opts = &rec->opts;
 	int rc = 0;
+	struct record_open_custom_fallback cust_fb = {
+		.fallback = {
+			.func = record__open_fallback
+		},
+		.opts = opts
+	};
 
 	/*
 	 * For initial_delay, system wide or a hybrid system, we need to add a
@@ -919,28 +956,12 @@ static int record__open(struct record *rec)
 
 	evlist__config(evlist, opts, &callchain_param);
 
-	evlist__for_each_entry(evlist, pos) {
-try_again:
-		if (evsel__open(pos, pos->core.cpus, pos->core.threads) < 0) {
-			if (evsel__fallback(pos, errno, msg, sizeof(msg))) {
-				if (verbose > 0)
-					ui__warning("%s\n", msg);
-				goto try_again;
-			}
-			if ((errno == EINVAL || errno == EBADF) &&
-			    pos->core.leader != &pos->core &&
-			    pos->weak_group) {
-			        pos = evlist__reset_weak_group(evlist, pos, true);
-				goto try_again;
-			}
-			rc = -errno;
-			evsel__open_strerror(pos, &opts->target, errno, msg, sizeof(msg));
-			ui__error("%s\n", msg);
-			goto out;
-		}
 
-		pos->supported = true;
-	}
+	do {
+		cust_fb.retry = false;
+		rc = evlist__open_custom(evlist, &cust_fb.fallback);
+	} while (cust_fb.retry);
+
 
 	if (symbol_conf.kptr_restrict && !evlist__exclude_kernel(evlist)) {
 		pr_warning(
