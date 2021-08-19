@@ -39,3 +39,5 @@ util/rwsem.c
 util/hashmap.c
 util/pmu-hybrid.c
 util/fncache.c
+util/workqueue/threadpool.c
+util/workqueue/workqueue.c
