@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <linux/list.h>
+#include <linux/err.h>
 #include "threadpool.h"
 
 struct work_struct;
@@ -28,6 +29,54 @@ extern int queue_work_on_worker(int tidx, struct workqueue_struct *wq, struct wo
 extern int flush_workqueue(struct workqueue_struct *wq);
 
 extern void init_work(struct work_struct *work);
+
+/* Global workqueue */
+
+extern struct workqueue_struct *global_wq;
+
+/**
+ * setup_global_wq - create the global_wq
+ */
+static inline int setup_global_workqueue(int nr_threads)
+{
+	global_wq = create_workqueue(nr_threads);
+	return IS_ERR(global_wq) ? PTR_ERR(global_wq) : 0;
+}
+
+/**
+ * teardown_global_wq - destroy the global_wq
+ */
+static inline int teardown_global_workqueue(void)
+{
+	int ret = destroy_workqueue(global_wq);
+
+	global_wq = NULL;
+	return ret;
+}
+
+/**
+ * schedule_work - queue @work on the global_wq
+ */
+static inline int schedule_work(struct work_struct *work)
+{
+	return queue_work(global_wq, work);
+}
+
+/**
+ * schedule_work - queue @work on thread @tidx of global_wq
+ */
+static inline int schedule_work_on_worker(int tidx, struct work_struct *work)
+{
+	return queue_work_on_worker(tidx, global_wq, work);
+}
+
+/**
+ * flush_scheduled_work - ensure that any scheduled work in global_wq has run to completion
+ */
+static inline int flush_scheduled_work(void)
+{
+	return flush_workqueue(global_wq);
+}
 
 #define WORKQUEUE_STRERR_BUFSIZE (128+THREADPOOL_STRERR_BUFSIZE)
 #define WORKQUEUE_ERROR__OFFSET 512
