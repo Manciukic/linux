@@ -201,6 +201,17 @@ out_cancel:
 }
 
 /**
+ * threadpool__wake_thread - send wake msg to @thread
+ *
+ * This function does not wait for the thread to actually wake
+ * NB: call only from main thread!
+ */
+static int threadpool__wake_thread(struct threadpool *pool, int tidx)
+{
+	return threadpool__send_cmd(pool, tidx, THREADPOOL_MSG__WAKE);
+}
+
+/**
  * threadpool_entry__send_ack - send ack to main thread
  */
 static int threadpool_entry__send_ack(struct threadpool_entry *thread)
@@ -270,6 +281,15 @@ static void *threadpool_entry__function(void *args)
 
 		if (cmd == THREADPOOL_MSG__STOP)
 			break;
+
+		if (!thread->pool->current_task) {
+			pr_debug("threadpool[%d]: received wake without task\n",
+				thread->tid);
+			break;
+		}
+
+		pr_debug("threadpool[%d]: executing task\n", thread->tid);
+		thread->pool->current_task->fn(thread->idx, thread->pool->current_task);
 	}
 
 	pr_debug2("threadpool[%d]: exit\n", thread->tid);
@@ -448,6 +468,12 @@ int threadpool__start_thread(struct threadpool *pool, int tidx)
 
 	thread->running = true;
 
+	if (pool->current_task) {
+		err = threadpool__wake_thread(pool, tidx);
+		if (err)
+			goto out_cancel;
+	}
+
 out:
 	pthread_attr_destroy(&attrs);
 
@@ -498,6 +524,10 @@ int threadpool__stop(struct threadpool *pool)
 {
 	int t, ret, err = 0;
 
+	err = threadpool__wait(pool);
+	if (err)
+		return err;
+
 	for (t = 0; t < pool->nr_threads; t++) {
 		/**
 		 * Even if a termination fails, we should continue to terminate
@@ -522,4 +552,68 @@ bool threadpool__is_running(struct threadpool *pool)
 		if (pool->threads[t].running)
 			return true;
 	return false;
+}
+
+/**
+ * threadpool__execute - set threadpool @task
+ *
+ * The task will be immediately executed on all started threads. If a thread
+ * is not running, it will start executing this task once started.
+ * The task will run asynchronously wrt the main thread.
+ * The task can be waited with threadpool__wait. Since no queueing is performed,
+ * you need to wait the pool before submitting a new task.
+ */
+int threadpool__execute(struct threadpool *pool, struct task_struct *task)
+{
+	int t, ret;
+
+	if (pool->current_task)
+		return -EBUSY;
+
+	pool->current_task = task;
+
+	for (t = 0; t < pool->nr_threads; t++) {
+		if (!pool->threads[t].running)
+			continue;
+		ret = threadpool__wake_thread(pool, t);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+/**
+ * threadpool__wait - wait until all threads in @pool are done
+ *
+ * This function will wait for all threads to finish execution and send their
+ * ack message.
+ *
+ * NB: call only from main thread!
+ */
+int threadpool__wait(struct threadpool *pool)
+{
+	int t, err = 0, ret;
+
+	if (!pool->current_task)
+		return 0;
+
+	for (t = 0; t < pool->nr_threads; t++) {
+		if (!pool->threads[t].running)
+			continue;
+		ret = threadpool__wait_thread(pool, t);
+		if (ret)
+			err = ret;
+	}
+
+	pool->current_task = NULL;
+	return err;
+}
+
+/**
+ * threadpool__is_busy - check if the pool has work to do
+ */
+bool threadpool__is_busy(struct threadpool *pool)
+{
+	return pool->current_task;
 }

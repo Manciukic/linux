@@ -18,8 +18,12 @@ extern int threadpool__start_thread(struct threadpool *pool, int tidx);
 extern int threadpool__start(struct threadpool *pool);
 extern int threadpool__stop(struct threadpool *pool);
 
+extern int threadpool__wait(struct threadpool *pool);
+extern int threadpool__execute(struct threadpool *pool, struct task_struct *task);
+
 extern int threadpool__size(struct threadpool *pool);
 extern bool threadpool__is_running(struct threadpool *pool);
+extern bool threadpool__is_busy(struct threadpool *pool);
 
 /* Error management */
 #define THREADPOOL_STRERR_BUFSIZE (128+STRERR_BUFSIZE)
