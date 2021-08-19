@@ -1945,6 +1945,82 @@ bool evsel__increase_rlimit(enum rlimit_action *set_rlimit)
 	return false;
 }
 
+static struct perf_event_open_result perf_event_open(struct evsel *evsel,
+					pid_t pid, int cpu, int thread,
+					struct perf_cpu_map *cpus,
+					struct perf_thread_map *threads)
+{
+	int fd, group_fd, rc;
+	struct perf_event_open_result res;
+
+	if (!evsel->cgrp && !evsel->core.system_wide)
+		pid = perf_thread_map__pid(threads, thread);
+
+	group_fd = get_group_fd(evsel, cpu, thread);
+
+	test_attr__ready();
+
+	pr_debug2_peo("sys_perf_event_open: pid %d  cpu %d  group_fd %d  flags %#lx",
+			pid, cpus->map[cpu], group_fd, evsel->open_flags);
+
+	fd = sys_perf_event_open(&evsel->core.attr, pid, cpus->map[cpu],
+				group_fd, evsel->open_flags);
+
+	FD(evsel, cpu, thread) = fd;
+	res.fd = fd;
+
+	if (fd < 0) {
+		rc = -errno;
+
+		pr_debug2_peo("\nsys_perf_event_open failed, error %d\n",
+				rc);
+		res.rc = rc;
+		res.err = PEO_FALLBACK;
+		return res;
+	}
+
+	bpf_counter__install_pe(evsel, cpu, fd);
+
+	if (unlikely(test_attr__enabled)) {
+		test_attr__open(&evsel->core.attr, pid,
+			cpus->map[cpu], fd,
+			group_fd, evsel->open_flags);
+	}
+
+	pr_debug2_peo(" = %d\n", fd);
+
+	if (evsel->bpf_fd >= 0) {
+		int evt_fd = fd;
+		int bpf_fd = evsel->bpf_fd;
+
+		rc = ioctl(evt_fd,
+				PERF_EVENT_IOC_SET_BPF,
+				bpf_fd);
+		if (rc && errno != EEXIST) {
+			pr_err("failed to attach bpf fd %d: %s\n",
+				bpf_fd, strerror(errno));
+			res.rc = -EINVAL;
+			res.err = PEO_ERROR;
+			return res;
+		}
+	}
+
+	/*
+	 * If we succeeded but had to kill clockid, fail and
+	 * have evsel__open_strerror() print us a nice error.
+	 */
+	if (perf_missing_features.clockid ||
+		perf_missing_features.clockid_wrong) {
+		res.rc = -EINVAL;
+		res.err = PEO_ERROR;
+		return res;
+	}
+
+	res.rc = 0;
+	res.err = PEO_SUCCESS;
+	return res;
+}
+
 static int evsel__open_cpu(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads,
 		int start_cpu, int end_cpu)
@@ -1952,6 +2028,7 @@ static int evsel__open_cpu(struct evsel *evsel, struct perf_cpu_map *cpus,
 	int cpu, thread, nthreads;
 	int pid = -1, err, old_errno;
 	enum rlimit_action set_rlimit = NO_CHANGE;
+	struct perf_event_open_result peo_res;
 
 	err = __evsel__prepare_open(evsel, cpus, threads);
 	if (err)
@@ -1979,67 +2056,22 @@ fallback_missing_features:
 	for (cpu = start_cpu; cpu < end_cpu; cpu++) {
 
 		for (thread = 0; thread < nthreads; thread++) {
-			int fd, group_fd;
 retry_open:
 			if (thread >= nthreads)
 				break;
 
-			if (!evsel->cgrp && !evsel->core.system_wide)
-				pid = perf_thread_map__pid(threads, thread);
+			peo_res = perf_event_open(evsel, pid, cpu, thread, cpus,
+						threads);
 
-			group_fd = get_group_fd(evsel, cpu, thread);
-
-			test_attr__ready();
-
-			pr_debug2_peo("sys_perf_event_open: pid %d  cpu %d  group_fd %d  flags %#lx",
-				pid, cpus->map[cpu], group_fd, evsel->open_flags);
-
-			fd = sys_perf_event_open(&evsel->core.attr, pid, cpus->map[cpu],
-						group_fd, evsel->open_flags);
-
-			FD(evsel, cpu, thread) = fd;
-
-			if (fd < 0) {
-				err = -errno;
-
-				pr_debug2_peo("\nsys_perf_event_open failed, error %d\n",
-					  err);
+			err = peo_res.rc;
+			switch (peo_res.err) {
+			case PEO_SUCCESS:
+				set_rlimit = NO_CHANGE;
+				continue;
+			case PEO_FALLBACK:
 				goto try_fallback;
-			}
-
-			bpf_counter__install_pe(evsel, cpu, fd);
-
-			if (unlikely(test_attr__enabled)) {
-				test_attr__open(&evsel->core.attr, pid, cpus->map[cpu],
-						fd, group_fd, evsel->open_flags);
-			}
-
-			pr_debug2_peo(" = %d\n", fd);
-
-			if (evsel->bpf_fd >= 0) {
-				int evt_fd = fd;
-				int bpf_fd = evsel->bpf_fd;
-
-				err = ioctl(evt_fd,
-					    PERF_EVENT_IOC_SET_BPF,
-					    bpf_fd);
-				if (err && errno != EEXIST) {
-					pr_err("failed to attach bpf fd %d: %s\n",
-					       bpf_fd, strerror(errno));
-					err = -EINVAL;
-					goto out_close;
-				}
-			}
-
-			set_rlimit = NO_CHANGE;
-
-			/*
-			 * If we succeeded but had to kill clockid, fail and
-			 * have evsel__open_strerror() print us a nice error.
-			 */
-			if (perf_missing_features.clockid ||
-			    perf_missing_features.clockid_wrong) {
-				err = -EINVAL;
+			default:
+			case PEO_ERROR:
 				goto out_close;
 			}
 		}
