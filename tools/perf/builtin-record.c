@@ -2945,6 +2945,16 @@ int cmd_record(int argc, const char **argv)
 			pr_err("setup_global_workqueue: %s\n", errbuf);
 			goto out;
 		}
+
+		if ((int)rec->opts.nr_threads >= rec->evlist->core.all_cpus->nr
+				&& rec->opts.multithreaded_evlist) {
+			err = workqueue_set_affinities_cpu(global_wq, rec->evlist->core.all_cpus);
+			if (err) {
+				workqueue_strerror(global_wq, err, errbuf, sizeof(errbuf));
+				pr_err("workqueue_set_affinities_cpu: %s\n", errbuf);
+				goto out;
+			}
+		}
 	}
 
 	err = __cmd_record(&record, argc, argv);
