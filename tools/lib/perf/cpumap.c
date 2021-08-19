@@ -265,11 +265,18 @@ bool perf_cpu_map__empty(const struct perf_cpu_map *map)
 
 int perf_cpu_map__idx(struct perf_cpu_map *cpus, int cpu)
 {
-	int i;
+	int low = 0, high = cpus->nr, idx, cpu_at_idx;
 
-	for (i = 0; i < cpus->nr; ++i) {
-		if (cpus->map[i] == cpu)
-			return i;
+	while (low < high) {
+		idx = (low + high) / 2;
+		cpu_at_idx = cpus->map[idx];
+
+		if (cpu_at_idx == cpu)
+			return idx;
+		else if (cpu_at_idx > cpu)
+			high = idx;
+		else
+			low = idx+1;
 	}
 
 	return -1;
