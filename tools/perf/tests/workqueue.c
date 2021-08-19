@@ -7,12 +7,18 @@
 #include "tests.h"
 #include "util/debug.h"
 #include "util/workqueue/threadpool.h"
+#include "util/workqueue/workqueue.h"
 
 #define DUMMY_FACTOR 100000
 #define N_DUMMY_WORK_SIZES 7
 
 struct threadpool_test_args_t {
 	int pool_size;
+};
+
+struct workqueue_test_args_t {
+	int pool_size;
+	int n_work_items;
 };
 
 struct test_task {
@@ -141,6 +147,43 @@ out:
 	return ret;
 }
 
+static int __workqueue__prepare(struct workqueue_struct **wq,
+				int pool_size)
+{
+	*wq = create_workqueue(pool_size);
+	TEST_ASSERT_VAL("workqueue creation failure", !IS_ERR(*wq));
+	TEST_ASSERT_VAL("workqueue wrong size", workqueue_nr_threads(*wq) == pool_size);
+
+	return TEST_OK;
+}
+
+static int __workqueue__teardown(struct workqueue_struct *wq)
+{
+	int ret = destroy_workqueue(wq);
+
+	TEST_ASSERT_VAL("workqueue detruction failure", ret == 0);
+
+	return 0;
+}
+
+static int __test__workqueue(void *_args)
+{
+	struct workqueue_test_args_t *args = _args;
+	struct workqueue_struct *wq;
+	int pool_size = args->pool_size ?: sysconf(_SC_NPROCESSORS_ONLN);
+	int ret = __workqueue__prepare(&wq, pool_size);
+
+	if (ret)
+		goto out;
+
+	ret = __workqueue__teardown(wq);
+	if (ret)
+		goto out;
+
+out:
+	return ret;
+}
+
 static const struct threadpool_test_args_t threadpool_test_args[] = {
 	{
 		.pool_size = 1
@@ -162,6 +205,37 @@ static const struct threadpool_test_args_t threadpool_test_args[] = {
 	}
 };
 
+static const struct workqueue_test_args_t workqueue_test_args[] = {
+	{
+		.pool_size = 1,
+		.n_work_items = 1
+	},
+	{
+		.pool_size = 1,
+		.n_work_items = 10
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 1
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 100
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 7
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 2789
+	},
+	{
+		.pool_size = 0,	// sysconf(_SC_NPROCESSORS_ONLN)
+		.n_work_items = 8191
+	}
+};
+
 struct test_case {
 	const char *desc;
 	int (*func)(void *args);
@@ -177,6 +251,13 @@ static struct test_case workqueue_testcase_table[] = {
 		.args = (void *) threadpool_test_args,
 		.n_args = (int)ARRAY_SIZE(threadpool_test_args),
 		.arg_size = sizeof(struct threadpool_test_args_t)
+	},
+	{
+		.desc = "Workqueue",
+		.func = __test__workqueue,
+		.args = (void *) workqueue_test_args,
+		.n_args = (int)ARRAY_SIZE(workqueue_test_args),
+		.arg_size = sizeof(struct workqueue_test_args_t)
 	}
 };
 
