@@ -49,6 +49,7 @@
 #include "util/clockid.h"
 #include "util/pmu-hybrid.h"
 #include "util/evlist-hybrid.h"
+#include "util/workqueue/workqueue.h"
 #include "asm/bug.h"
 #include "perf.h"
 
@@ -2894,7 +2895,21 @@ int cmd_record(int argc, const char **argv)
 		rec->opts.comp_level = comp_level_max;
 	pr_debug("comp level: %d\n", rec->opts.comp_level);
 
+	if (rec->opts.nr_threads_synthesize == UINT_MAX)
+		rec->opts.nr_threads_synthesize = sysconf(_SC_NPROCESSORS_ONLN);
+	if (rec->opts.nr_threads_synthesize > 1) {
+		err = setup_global_workqueue(rec->opts.nr_threads_synthesize);
+		if (err) {
+			create_workqueue_strerror(global_wq, errbuf, sizeof(errbuf));
+			pr_err("setup_global_workqueue: %s\n", errbuf);
+			goto out;
+		}
+	}
+
 	err = __cmd_record(&record, argc, argv);
+
+	if (rec->opts.nr_threads_synthesize > 1)
+		teardown_global_workqueue();
 out:
 	bitmap_free(rec->affinity_mask.bits);
 	evlist__delete(rec->evlist);
