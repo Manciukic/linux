@@ -39,6 +39,7 @@ struct workqueue_struct {
 	int			msg_pipe[2];	/* main thread comm pipes */
 	struct worker		*workers;	/* array of all workers */
 	struct worker		*next_worker;	/* next worker to choose (round robin) */
+	int			first_stopped_worker; /* next worker to start if needed */
 };
 
 static const char * const workqueue_errno_str[] = {
@@ -359,7 +360,7 @@ static void worker__thread(int tidx, struct task_struct *task)
  */
 struct workqueue_struct *create_workqueue(int nr_threads)
 {
-	int ret, err = 0, t, t2, tt;
+	int ret, err = 0, t, tt;
 	struct workqueue_struct *wq = zalloc(sizeof(struct workqueue_struct));
 
 	if (!wq) {
@@ -415,27 +416,11 @@ struct workqueue_struct *create_workqueue(int nr_threads)
 		goto out_close_pipe;
 	}
 
-	for (t2 = 0; t2 < nr_threads; t2++) {
-		workqueue__lock(wq);
-		workqueue__prepare_wake_worker(wq, &wq->workers[t2]);
-		workqueue__unlock(wq);
-		err = workqueue__spinup_worker(wq, &wq->workers[t2]);
-		if (err)
-			goto out_stop_pool;
-	}
-
 	wq->next_worker = NULL;
+	wq->first_stopped_worker = 0;
 
 	return wq;
 
-out_stop_pool:
-	workqueue__lock(wq);
-	for (tt = 0; tt < t2; tt++) {
-		ret = workqueue__stop_worker(wq, &wq->workers[tt]);
-		if (ret)
-			err = ret;
-	}
-	workqueue__unlock(wq);
 out_close_pipe:
 	close(wq->msg_pipe[0]);
 	wq->msg_pipe[0] = -1;
@@ -597,10 +582,16 @@ __releases(&worker->lock)
 
 	switch (worker->status) {
 	case WORKER_STATUS__NOT_RUNNING:
+		list_add_tail(&work->entry, &worker->queue);
+		workqueue__prepare_wake_worker(wq, worker);
+
 		worker__unlock(worker);
 		workqueue__unlock(wq);
-		pr_debug2("workqueue: worker is not running\n");
-		return -WORKQUEUE_ERROR__INVALIDWORKERSTATUS;
+
+		ret = workqueue__spinup_worker(wq, worker);
+		if (!ret)
+			pr_debug("workqueue: spun up worker %d\n", worker->tidx);
+		return ret;
 	case WORKER_STATUS__BUSY:
 		list_add_tail(&work->entry, &worker->queue);
 
@@ -643,8 +634,19 @@ int queue_work(struct workqueue_struct *wq, struct work_struct *work)
 
 	workqueue__lock(wq);
 	if (list_empty(&wq->idle_list)) {
-		worker = wq->next_worker;
-		workqueue__advance_next_worker(wq);
+		// find a worker to spin up
+		while (wq->first_stopped_worker < threadpool__size(wq->pool)) {
+			worker = &wq->workers[wq->first_stopped_worker];
+			if (worker->status == WORKER_STATUS__NOT_RUNNING)
+				break;	// found a worker to spin up
+			wq->first_stopped_worker++;
+		}
+
+		// not found
+		if (wq->first_stopped_worker == threadpool__size(wq->pool)) {
+			worker = wq->next_worker;
+			workqueue__advance_next_worker(wq);
+		}
 	} else {
 		worker = list_first_entry(&wq->idle_list, struct worker, entry);
 	}
