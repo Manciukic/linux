@@ -407,7 +407,7 @@ static int read_affinity_counters(struct timespec *rs)
 {
 	struct evsel *counter;
 	struct affinity affinity;
-	int i, ncpus, cpu;
+	int i, ncpus, cpu, cpu_idx;
 
 	if (all_counters_use_bpf)
 		return 0;
@@ -424,13 +424,14 @@ static int read_affinity_counters(struct timespec *rs)
 		affinity__set(&affinity, cpu);
 
 		evlist__for_each_entry(evsel_list, counter) {
-			if (evsel__cpu_iter_skip(counter, cpu))
+			cpu_idx = evsel__find_cpu(counter, cpu);
+			if (cpu_idx < 0)
 				continue;
 			if (evsel__is_bpf(counter))
 				continue;
 			if (!counter->err) {
 				counter->err = read_counter_cpu(counter, rs,
-								counter->cpu_iter - 1);
+								cpu_idx);
 			}
 		}
 	}
@@ -789,7 +790,7 @@ static int __run_perf_stat(int argc, const char **argv, int run_idx)
 	const bool forks = (argc > 0);
 	bool is_pipe = STAT_RECORD ? perf_stat.data.is_pipe : false;
 	struct affinity affinity;
-	int i, cpu, err;
+	int i, cpu, cpu_idx, err;
 	bool second_pass = false;
 
 	if (forks) {
@@ -823,7 +824,8 @@ static int __run_perf_stat(int argc, const char **argv, int run_idx)
 		affinity__set(&affinity, cpu);
 
 		evlist__for_each_entry(evsel_list, counter) {
-			if (evsel__cpu_iter_skip(counter, cpu))
+			cpu_idx = evsel__find_cpu(counter, cpu);
+			if (cpu_idx < 0)
 				continue;
 			if (counter->reset_group || counter->errored)
 				continue;
@@ -831,7 +833,7 @@ static int __run_perf_stat(int argc, const char **argv, int run_idx)
 				continue;
 try_again:
 			if (create_perf_stat_counter(counter, &stat_config, &target,
-						     counter->cpu_iter - 1) < 0) {
+						     cpu_idx) < 0) {
 
 				/*
 				 * Weak group failed. We cannot just undo this here
@@ -877,22 +879,24 @@ try_again:
 			evlist__for_each_entry(evsel_list, counter) {
 				if (!counter->reset_group && !counter->errored)
 					continue;
-				if (evsel__cpu_iter_skip_no_inc(counter, cpu))
+				cpu_idx = evsel__find_cpu(counter, cpu);
+				if (cpu_idx < 0)
 					continue;
-				perf_evsel__close_cpu(&counter->core, counter->cpu_iter);
+				perf_evsel__close_cpu(&counter->core, cpu_idx);
 			}
 			/* Now reopen weak */
 			evlist__for_each_entry(evsel_list, counter) {
 				if (!counter->reset_group && !counter->errored)
 					continue;
-				if (evsel__cpu_iter_skip(counter, cpu))
+				cpu_idx = evsel__find_cpu(counter, cpu);
+				if (cpu_idx < 0)
 					continue;
 				if (!counter->reset_group)
 					continue;
 try_again_reset:
 				pr_debug2("reopening weak %s\n", evsel__name(counter));
 				if (create_perf_stat_counter(counter, &stat_config, &target,
-							     counter->cpu_iter - 1) < 0) {
+							     cpu_idx) < 0) {
 
 					switch (stat_handle_error(counter)) {
 					case COUNTER_FATAL:
