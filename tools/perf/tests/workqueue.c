@@ -7,6 +7,7 @@
 #include "tests.h"
 #include "util/debug.h"
 #include "util/workqueue/threadpool.h"
+#include "util/workqueue/workqueue.h"
 
 #define DUMMY_FACTOR 100000
 #define N_DUMMY_WORK_SIZES 7
@@ -176,8 +177,96 @@ static int test__threadpool(struct test_suite *test __maybe_unused,
 	return TEST_OK;
 }
 
+static int __workqueue__prepare(struct workqueue_struct **wq,
+				int pool_size)
+{
+	*wq = create_workqueue(pool_size);
+	TEST_ASSERT_VAL("workqueue creation failure", !IS_ERR(*wq));
+	TEST_ASSERT_VAL("workqueue wrong size", workqueue_nr_threads(*wq) == pool_size);
+
+	return TEST_OK;
+}
+
+static int __workqueue__teardown(struct workqueue_struct *wq)
+{
+	int ret = destroy_workqueue(wq);
+
+	TEST_ASSERT_VAL("workqueue detruction failure", ret == 0);
+
+	return 0;
+}
+
+static int __test__workqueue(int pool_size, int n_work_items __maybe_unused)
+{
+	struct workqueue_struct *wq;
+	int ret;
+
+	if (!pool_size)
+		pool_size = sysconf(_SC_NPROCESSORS_ONLN);
+	ret = __workqueue__prepare(&wq, pool_size);
+	if (ret)
+		goto out;
+
+	ret = __workqueue__teardown(wq);
+	if (ret)
+		goto out;
+
+out:
+	return ret;
+}
+
+static const struct workqueue_test_args_t {
+	int pool_size;
+	int n_work_items;
+} workqueue_test_args[] = {
+	{
+		.pool_size = 1,
+		.n_work_items = 1
+	},
+	{
+		.pool_size = 1,
+		.n_work_items = 10
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 1
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 100
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 7
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 2789
+	},
+	{
+		.pool_size = 0,	// sysconf(_SC_NPROCESSORS_ONLN)
+		.n_work_items = 8191
+	}
+};
+
+static int test__workqueue(struct test_suite *test __maybe_unused,
+			    int subtest __maybe_unused)
+{
+	int i, ret;
+
+	for (i = 0; i < (int)ARRAY_SIZE(workqueue_test_args); i++) {
+		ret = __test__workqueue(workqueue_test_args[i].pool_size,
+					 workqueue_test_args[i].n_work_items);
+		if (ret)
+			return ret;
+	}
+
+	return TEST_OK;
+}
+
 static struct test_case workqueue_tests[] = {
 	TEST_CASE("Threadpool", threadpool),
+	TEST_CASE("Workqueue", workqueue),
 	{ .name = NULL, }
 };
 
