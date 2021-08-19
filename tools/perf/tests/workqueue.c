@@ -4,6 +4,8 @@
 #include <linux/kernel.h>
 #include <linux/err.h>
 #include <linux/zalloc.h>
+#include <linux/bitmap.h>
+#include <perf/cpumap.h>
 #include "tests.h"
 #include "util/debug.h"
 #include "util/workqueue/threadpool.h"
@@ -31,6 +33,7 @@ struct test_task {
 	struct task_struct task;
 	int n_threads;
 	int *array;
+	struct mmap_cpu_mask *affinity_masks;
 };
 
 /**
@@ -54,9 +57,36 @@ static void dummy_work(int idx)
 static void test_task_fn1(int tidx, struct task_struct *task)
 {
 	struct test_task *mtask = container_of(task, struct test_task, task);
+	struct mmap_cpu_mask real_affinity_mask, *set_affinity_mask;
+	int ret;
+
+	set_affinity_mask = &mtask->affinity_masks[tidx];
+	real_affinity_mask.nbits = set_affinity_mask->nbits;
+	real_affinity_mask.bits = bitmap_alloc(real_affinity_mask.nbits);
+	if (!real_affinity_mask.bits) {
+		pr_err("ENOMEM in malloc real_affinity_mask.bits\n");
+		goto out;
+	}
+
+	ret = pthread_getaffinity_np(pthread_self(), real_affinity_mask.nbits,
+				(cpu_set_t *)real_affinity_mask.bits);
+	if (ret) {
+		pr_err("Error in pthread_getaffinity_np: %s\n", strerror(ret));
+		goto out;
+	}
+
+	if (!bitmap_equal(real_affinity_mask.bits, set_affinity_mask->bits,
+			real_affinity_mask.nbits)) {
+		pr_err("affinity mismatch!\n");
+		mmap_cpu_mask__scnprintf(set_affinity_mask, "set affinity");
+		mmap_cpu_mask__scnprintf(&real_affinity_mask, "real affinity");
+		goto out;
+	}
 
 	dummy_work(tidx);
 	mtask->array[tidx] = tidx+1;
+out:
+	bitmap_free(real_affinity_mask.bits);
 }
 
 static void test_task_fn2(int tidx, struct task_struct *task)
@@ -116,21 +146,58 @@ static int __test__threadpool(void *_args)
 {
 	struct threadpool_test_args_t *args = _args;
 	struct threadpool *pool;
+	int ret, i, nr_cpus, nr_bits, cpu;
 	struct test_task task;
 	int pool_size = args->pool_size ?: sysconf(_SC_NPROCESSORS_ONLN);
-	int i, ret = __threadpool__prepare(&pool, pool_size);
+	struct perf_cpu_map *cpumap = perf_cpu_map__new(NULL);
+	struct mmap_cpu_mask *affinity_masks;
 
-	if (ret)
-		goto out;
+	if (!cpumap) {
+		pr_err("ENOMEM in perf_cpu_map__new\n");
+		return TEST_FAIL;
+	}
+
+	nr_cpus = perf_cpu_map__nr(cpumap);
+	nr_bits = BITS_TO_LONGS(nr_cpus) * sizeof(unsigned long);
+
+	affinity_masks = calloc(pool_size, sizeof(*affinity_masks));
+	if (!affinity_masks) {
+		pr_err("ENOMEM in calloc affinity_masks\n");
+		ret = TEST_FAIL;
+		goto out_put_cpumap;
+	}
+
+	for (i = 0; i < pool_size; i++) {
+		affinity_masks[i].nbits = nr_bits;
+		affinity_masks[i].bits = bitmap_alloc(nr_cpus);
+		if (!affinity_masks[i].bits) {
+			ret = TEST_FAIL;
+			goto out_free_affinity_masks;
+		}
+		bitmap_zero(affinity_masks[i].bits, affinity_masks[i].nbits);
+		cpu = perf_cpu_map__cpu(cpumap, i % nr_cpus);
+		test_and_set_bit(cpu, affinity_masks[i].bits);
+	}
 
 	task.task.fn = test_task_fn1;
 	task.n_threads = pool_size;
+	task.affinity_masks = affinity_masks;
 	task.array = calloc(pool_size, sizeof(*task.array));
 	TEST_ASSERT_VAL("calloc failure", task.array);
 
+	ret = __threadpool__prepare(&pool, pool_size);
+	if (ret)
+		goto out_free_tasks;
+
+	ret = threadpool__set_affinities(pool, task.affinity_masks);
+	if (ret) {
+		ret = TEST_FAIL;
+		goto out_free_tasks;
+	}
+
 	ret = __threadpool__exec_wait(pool, &task.task);
 	if (ret)
-		goto out;
+		goto out_free_tasks;
 
 	for (i = 0; i < pool_size; i++)
 		TEST_ASSERT_VAL("failed array check (1)", task.array[i] == i+1);
@@ -139,17 +206,23 @@ static int __test__threadpool(void *_args)
 
 	ret = __threadpool__exec_wait(pool, &task.task);
 	if (ret)
-		goto out;
+		goto out_free_tasks;
 
 	for (i = 0; i < pool_size; i++)
 		TEST_ASSERT_VAL("failed array check (2)", task.array[i] == 2*i);
 
 	ret = __threadpool__teardown(pool);
 	if (ret)
-		goto out;
+		goto out_free_tasks;
 
-out:
+out_free_tasks:
 	free(task.array);
+out_free_affinity_masks:
+	for (i = 0; i < pool_size; i++)
+		bitmap_free(affinity_masks[i].bits);
+	free(affinity_masks);
+out_put_cpumap:
+	perf_cpu_map__put(cpumap);
 	return ret;
 }
 

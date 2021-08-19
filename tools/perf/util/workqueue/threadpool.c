@@ -13,7 +13,9 @@
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <pthread.h>
+#include <linux/bitmap.h>
 #include <internal/lib.h>
+#include "util/mmap.h"
 #include "threadpool.h"
 
 #ifndef HAVE_GETTID
@@ -39,6 +41,7 @@ struct threadpool_entry {
 		int cmd[2];			/* messages to thread (commands) */
 	} pipes;
 	bool				running; /* has this thread been started? */
+	struct mmap_cpu_mask		affinity_mask;
 };
 
 enum threadpool_msg {
@@ -256,6 +259,16 @@ static int threadpool_entry__recv_cmd(struct threadpool_entry *thread,
 }
 
 /**
+ * threadpool_entry__apply_affinity - apply @thread->affinity
+ */
+static int threadpool_entry__apply_affinity(struct threadpool_entry *thread)
+{
+	return -pthread_setaffinity_np(thread->ptid,
+			MMAP_CPU_MASK_BYTES(&thread->affinity_mask),
+			(cpu_set_t *)(thread->affinity_mask.bits));
+}
+
+/**
  * threadpool_entry__function - function running on thread
  *
  * This function waits for a signal from main thread to start executing
@@ -339,6 +352,7 @@ struct threadpool *threadpool__new(int n_threads)
 		pool->threads[t].ptid = 0;
 		pool->threads[t].pool = pool;
 		pool->threads[t].running = false;
+		// affinity is set to zero due to calloc
 		threadpool_entry__init_pipes(&pool->threads[t]);
 	}
 
@@ -414,6 +428,7 @@ void threadpool__delete(struct threadpool *pool)
 	for (t = 0; t < pool->nr_threads; t++) {
 		thread = &pool->threads[t];
 		threadpool_entry__close_pipes(thread);
+		bitmap_free(thread->affinity_mask.bits);
 	}
 
 	zfree(&pool->threads);
@@ -454,6 +469,16 @@ int threadpool__start_thread(struct threadpool *pool, int tidx)
 
 	pthread_attr_init(&attrs);
 	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
+	if (thread->affinity_mask.bits) {
+		ret = pthread_attr_setaffinity_np(&attrs,
+				MMAP_CPU_MASK_BYTES(&thread->affinity_mask),
+				(cpu_set_t *)(thread->affinity_mask.bits));
+		if (ret) {
+			err = -ret;
+			goto out;
+		}
+	}
 
 	ret = pthread_create(&thread->ptid, &attrs, threadpool_entry__function, thread);
 	if (ret) {
@@ -616,4 +641,49 @@ int threadpool__wait(struct threadpool *pool)
 bool threadpool__is_busy(struct threadpool *pool)
 {
 	return pool->current_task;
+}
+
+/**
+ * threadpool__set_affinity - set @affinity of the @tid thread in @pool
+ *
+ * If threadpool is not running affinity will be set on start.
+ * If threadpool is running, affinity is immediately set.
+ *
+ * This function can be called from any thread.
+ */
+int threadpool__set_affinity(struct threadpool *pool, int tid,
+				struct mmap_cpu_mask *affinity)
+{
+	struct threadpool_entry *thread = &pool->threads[tid];
+	int ret = mmap_cpu_mask__duplicate(affinity, &thread->affinity_mask);
+
+	if (ret)
+		return ret;
+
+	if (thread->running)
+		return threadpool_entry__apply_affinity(thread);
+	else
+		return 0;
+}
+
+/**
+ * threadpool__set_affinities - set @affinities of all threads in @pool
+ *
+ * If threadpool is not running, affinities will be set on start.
+ * If threadpool is running, affinities are immediately set.
+ *
+ * This function can be called from any thread.
+ */
+int threadpool__set_affinities(struct threadpool *pool,
+				struct mmap_cpu_mask *affinities)
+{
+	int i, ret;
+
+	for (i = 0; i < pool->nr_threads; i++) {
+		ret = threadpool__set_affinity(pool, i, &affinities[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }

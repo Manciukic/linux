@@ -2,6 +2,8 @@
 #ifndef __WORKQUEUE_THREADPOOL_H
 #define __WORKQUEUE_THREADPOOL_H
 
+#include "util/mmap.h"
+
 struct threadpool;
 struct task_struct;
 
@@ -24,6 +26,11 @@ extern int threadpool__execute(struct threadpool *pool, struct task_struct *task
 extern int threadpool__size(struct threadpool *pool);
 extern bool threadpool__is_running(struct threadpool *pool);
 extern bool threadpool__is_busy(struct threadpool *pool);
+
+extern int threadpool__set_affinities(struct threadpool *pool,
+				struct mmap_cpu_mask *affinities);
+extern int threadpool__set_affinity(struct threadpool *pool, int tid,
+				struct mmap_cpu_mask *affinity);
 
 /* Error management */
 #define THREADPOOL_STRERR_BUFSIZE (128+STRERR_BUFSIZE)
