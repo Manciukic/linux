@@ -2021,6 +2021,50 @@ static struct perf_event_open_result perf_event_open(struct evsel *evsel,
 	return res;
 }
 
+struct evsel_open_result evsel__open_per_cpu_no_fallback(struct evsel *evsel,
+					struct perf_cpu_map *cpus,
+					struct perf_thread_map *threads,
+					int cpu, int start_thread)
+{
+	int thread, nthreads, pid = -1;
+	struct evsel_open_result res = { .thread = start_thread };
+
+	if (cpus == NULL)
+		cpus = empty_cpu_map;
+
+	if (threads == NULL)
+		threads = empty_thread_map;
+
+	if (evsel->core.system_wide)
+		nthreads = 1;
+	else
+		nthreads = threads->nr;
+
+	if (evsel->cgrp)
+		pid = evsel->cgrp->fd;
+
+	display_attr(&evsel->core.attr);
+
+
+	for (thread = start_thread; thread < nthreads; thread++) {
+		res.peo_res = perf_event_open(evsel, pid, cpu, thread, cpus,
+					threads);
+
+		switch (res.peo_res.err) {
+		case PEO_SUCCESS:
+			continue;
+		case PEO_FALLBACK:
+			goto out;
+		default:
+		case PEO_ERROR:
+			goto out;
+		}
+	}
+out:
+	res.thread = thread;
+	return res;
+}
+
 static int evsel__open_cpu(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads,
 		int start_cpu, int end_cpu)

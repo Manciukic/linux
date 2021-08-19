@@ -294,10 +294,19 @@ struct perf_event_open_result {
 	int fd;
 };
 
+struct evsel_open_result {
+	int thread;
+	struct perf_event_open_result peo_res;
+};
+
 int evsel__open_per_cpu(struct evsel *evsel, struct perf_cpu_map *cpus, int cpu);
 int evsel__open_per_thread(struct evsel *evsel, struct perf_thread_map *threads);
 int evsel__open(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads);
+struct evsel_open_result evsel__open_per_cpu_no_fallback(struct evsel *evsel,
+					struct perf_cpu_map *cpus,
+					struct perf_thread_map *threads,
+					int cpu, int start_thread);
 void evsel__close(struct evsel *evsel);
 int evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads);
