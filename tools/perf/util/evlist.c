@@ -552,37 +552,22 @@ void evlist__disable_evsel(struct evlist *evlist, char *evsel_name)
 	__evlist__disable(evlist, evsel_name);
 }
 
+static int __evlist__enable_evsel_cpu_fun(struct evlist *evlist __maybe_unused,
+					struct evsel *pos, int cpu, void *args)
+{
+	char *evsel_name = args;
+
+	if (evsel__strcmp(pos, evsel_name))
+		return 0;
+	if (!evsel__is_group_leader(pos) || !pos->core.fd)
+		return 0;
+	evsel__enable_cpu(pos, cpu);
+	return 0;
+}
+
 static void __evlist__enable(struct evlist *evlist, char *evsel_name)
 {
-	struct evsel *pos;
-	struct affinity affinity;
-	int cpu, i, cpu_idx;
-
-	if (affinity__setup(&affinity) < 0)
-		return;
-
-	evlist__for_each_cpu(evlist, i, cpu) {
-		affinity__set(&affinity, cpu);
-
-		evlist__for_each_entry(evlist, pos) {
-			if (evsel__strcmp(pos, evsel_name))
-				continue;
-			cpu_idx = evsel__find_cpu(pos, cpu);
-			if (cpu_idx < 0)
-				continue;
-			if (!evsel__is_group_leader(pos) || !pos->core.fd)
-				continue;
-			evsel__enable_cpu(pos, cpu_idx);
-		}
-	}
-	affinity__cleanup(&affinity);
-	evlist__for_each_entry(evlist, pos) {
-		if (evsel__strcmp(pos, evsel_name))
-			continue;
-		if (!evsel__is_group_leader(pos) || !pos->core.fd)
-			continue;
-		pos->disabled = false;
-	}
+	evlist__for_each_evsel_cpu(evlist, __evlist__enable_evsel_cpu_fun, evsel_name);
 
 	/*
 	 * Even single event sets the 'enabled' for evlist,
