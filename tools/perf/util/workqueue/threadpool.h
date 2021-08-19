@@ -14,10 +14,23 @@ struct task_struct {
 extern struct threadpool *threadpool__new(int n_threads);
 extern void threadpool__delete(struct threadpool *pool);
 
+extern int threadpool__start_thread(struct threadpool *pool, int tidx);
+extern int threadpool__start(struct threadpool *pool);
+extern int threadpool__stop(struct threadpool *pool);
+
 extern int threadpool__size(struct threadpool *pool);
+extern bool threadpool__is_running(struct threadpool *pool);
 
 /* Error management */
 #define THREADPOOL_STRERR_BUFSIZE (128+STRERR_BUFSIZE)
+#define THREADPOOL_ERROR__OFFSET 512
+enum {
+	THREADPOOL_ERROR__SIGPROCMASK = THREADPOOL_ERROR__OFFSET,
+	THREADPOOL_ERROR__READPIPE,
+	THREADPOOL_ERROR__WRITEPIPE,
+	THREADPOOL_ERROR__INVALIDMSG,
+	THREADPOOL_ERROR__NOTALLOWED
+};
 extern int threadpool__strerror(struct threadpool *pool, int err, char *buf, size_t size);
 extern int threadpool__new_strerror(struct threadpool *err_ptr, char *buf, size_t size);
 
