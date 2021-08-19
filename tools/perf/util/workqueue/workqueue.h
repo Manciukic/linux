@@ -25,6 +25,7 @@ extern int workqueue_nr_threads(struct workqueue_struct *wq);
 
 extern int queue_work(struct workqueue_struct *wq, struct work_struct *work);
 extern int queue_work_on_worker(int tidx, struct workqueue_struct *wq, struct work_struct *work);
+extern int queue_work_on(int cpu, struct workqueue_struct *wq, struct work_struct *work);
 
 extern int flush_workqueue(struct workqueue_struct *wq);
 
@@ -32,6 +33,9 @@ extern int workqueue_set_affinities(struct workqueue_struct *wq,
 				struct mmap_cpu_mask *affinities);
 extern int workqueue_set_affinity(struct workqueue_struct *wq, int tidx,
 				struct mmap_cpu_mask *affinity);
+extern int workqueue_set_affinity_cpu(struct workqueue_struct *wq, int tidx, int cpu);
+extern int workqueue_set_affinities_cpu(struct workqueue_struct *wq,
+					struct perf_cpu_map *cpus);
 
 extern void init_work(struct work_struct *work);
 
@@ -80,6 +84,14 @@ static inline int schedule_work(struct work_struct *work)
 static inline int schedule_work_on_worker(int tidx, struct work_struct *work)
 {
 	return queue_work_on_worker(tidx, global_wq, work);
+}
+
+/**
+ * schedule_work_on - queue @work to be executed on @cpu by global_wq
+ */
+static inline int schedule_work_on(int cpu, struct work_struct *work)
+{
+	return queue_work_on(cpu, global_wq, work);
 }
 
 /**
