@@ -1414,6 +1414,7 @@ static int record__synthesize(struct record *rec, bool tail)
 	struct perf_tool *tool = &rec->tool;
 	int err = 0;
 	event_op f = process_synthesized_event;
+	bool perf_was_singlethreaded = perf_singlethreaded;
 
 	if (rec->opts.tail_synthesize != tail)
 		return 0;
@@ -1504,6 +1505,8 @@ static int record__synthesize(struct record *rec, bool tail)
 	if (rec->opts.multithreaded_synthesis) {
 		perf_set_multithreaded();
 		f = process_locked_synthesized_event;
+	} else {
+		perf_set_singlethreaded();
 	}
 
 	if (rec->opts.synth & PERF_SYNTH_TASK) {
@@ -1514,7 +1517,9 @@ static int record__synthesize(struct record *rec, bool tail)
 						    f, needs_mmap, opts->sample_address);
 	}
 
-	if (rec->opts.multithreaded_synthesis)
+	if (!perf_was_singlethreaded && perf_singlethreaded)
+		perf_set_multithreaded();
+	if (perf_was_singlethreaded && !perf_singlethreaded)
 		perf_set_singlethreaded();
 
 out:
@@ -1745,6 +1750,9 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 
 	record__uniquify_name(rec);
 
+	if (rec->opts.multithreaded_evlist)
+		perf_set_multithreaded();
+
 	if (record__open(rec) != 0) {
 		err = -1;
 		goto out_child;
@@ -1887,6 +1895,10 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 		}
 	}
 
+	// disable locks in the main thread since there is no multithreading
+	if (rec->opts.multithreaded_evlist)
+		perf_set_singlethreaded();
+
 	trigger_ready(&auxtrace_snapshot_trigger);
 	trigger_ready(&switch_output_trigger);
 	perf_hooks__invoke_record_start();
@@ -2008,6 +2020,10 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 		}
 	}
 
+	// reenable multithreading for evlist
+	if (rec->opts.multithreaded_evlist)
+		perf_set_multithreaded();
+
 	trigger_off(&auxtrace_snapshot_trigger);
 	trigger_off(&switch_output_trigger);
 
@@ -2109,6 +2125,10 @@ out_delete_session:
 
 	if (!opts->no_bpf_event)
 		evlist__stop_sb_thread(rec->sb_evlist);
+
+	// disable multithreaded mode on exit
+	if (rec->opts.multithreaded_evlist)
+		perf_set_singlethreaded();
 	return status;
 }
 
