@@ -334,9 +334,108 @@ static int test__workqueue(struct test_suite *test __maybe_unused,
 	return TEST_OK;
 }
 
+static const struct parallel_for_test_args_t {
+	int pool_size;
+	int n_work_items;
+	int work_size;
+} parallel_for_test_args[] = {
+	{
+		.pool_size = 1,
+		.n_work_items = 1,
+		.work_size = 1
+	},
+	{
+		.pool_size = 1,
+		.n_work_items = 10,
+		.work_size = 3
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 1,
+		.work_size = 1
+	},
+	{
+		.pool_size = 2,
+		.n_work_items = 100,
+		.work_size = 10
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 7,
+		.work_size = 2
+	},
+	{
+		.pool_size = 16,
+		.n_work_items = 2789,
+		.work_size = 16
+	},
+	{
+		.pool_size = 0,	// sysconf(_SC_NPROCESSORS_ONLN)
+		.n_work_items = 8191,
+		.work_size = 17
+	}
+};
+
+static void test_pfw_fn(int i, void *args)
+{
+	int *array = args;
+
+	dummy_work(i);
+	array[i] = i+1;
+}
+
+static int __test__parallel_for(int pool_size, int n_work_items, int work_size)
+{
+	struct workqueue_struct *wq;
+	int ret, i;
+	int *array = calloc(n_work_items, sizeof(*array));
+
+	TEST_ASSERT_VAL("calloc array failure", array);
+
+	if (!pool_size)
+		pool_size = sysconf(_SC_NPROCESSORS_ONLN);
+
+	ret = __workqueue__prepare(&wq, pool_size);
+	if (ret)
+		goto out;
+
+	ret = parallel_for(wq, 0, n_work_items, work_size,
+				test_pfw_fn, array);
+	TEST_ASSERT_VAL("parallel_for failure", ret == 0);
+
+	for (i = 0; i < n_work_items; i++)
+		TEST_ASSERT_VAL("failed array check", array[i] == i+1);
+
+	ret = __workqueue__teardown(wq);
+	if (ret)
+		goto out;
+
+out:
+	free(array);
+
+	return TEST_OK;
+}
+
+static int test__parallel_for(struct test_suite *test __maybe_unused,
+			    int subtest __maybe_unused)
+{
+	int i, ret;
+
+	for (i = 0; i < (int)ARRAY_SIZE(parallel_for_test_args); i++) {
+		ret = __test__parallel_for(parallel_for_test_args[i].pool_size,
+					 parallel_for_test_args[i].n_work_items,
+					 parallel_for_test_args[i].work_size);
+		if (ret)
+			return ret;
+	}
+
+	return TEST_OK;
+}
+
 static struct test_case workqueue_tests[] = {
 	TEST_CASE("Threadpool", threadpool),
 	TEST_CASE("Workqueue", workqueue),
+	TEST_CASE("Workqueue parallel-for", parallel_for),
 	{ .name = NULL, }
 };
 
