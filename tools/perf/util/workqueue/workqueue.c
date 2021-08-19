@@ -13,6 +13,8 @@
 #include <internal/lib.h>
 #include "workqueue.h"
 
+struct workqueue_struct *global_wq;
+
 enum worker_msg {
 	WORKER_MSG__UNDEFINED,
 	WORKER_MSG__READY,                          /* from worker: ack */
