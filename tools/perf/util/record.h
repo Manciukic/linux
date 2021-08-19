@@ -74,6 +74,9 @@ struct record_opts {
 	int	      mmap_flush;
 	unsigned int  comp_level;
 	unsigned int  nr_threads_synthesize;
+	unsigned int  nr_threads;
+	bool	      multithreaded_synthesis;
+	bool	      multithreaded_evlist;
 	int	      ctl_fd;
 	int	      ctl_fd_ack;
 	bool	      ctl_fd_close;

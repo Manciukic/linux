@@ -1501,7 +1501,7 @@ static int record__synthesize(struct record *rec, bool tail)
 			pr_warning("Couldn't synthesize cgroup events.\n");
 	}
 
-	if (rec->opts.nr_threads_synthesize > 1) {
+	if (rec->opts.multithreaded_synthesis) {
 		perf_set_multithreaded();
 		f = process_locked_synthesized_event;
 	}
@@ -1514,7 +1514,7 @@ static int record__synthesize(struct record *rec, bool tail)
 						    f, needs_mmap, opts->sample_address);
 	}
 
-	if (rec->opts.nr_threads_synthesize > 1)
+	if (rec->opts.multithreaded_synthesis)
 		perf_set_singlethreaded();
 
 out:
@@ -2198,6 +2198,12 @@ static int perf_record_config(const char *var, const char *value, void *cb)
 			rec->opts.nr_cblocks = nr_cblocks_default;
 	}
 #endif
+	if (!strcmp(var, "record.multithreaded-synthesis"))
+		rec->opts.multithreaded_synthesis = perf_config_bool(var, value);
+
+	if (!strcmp(var, "record.multithreaded-evlist"))
+		rec->opts.multithreaded_evlist = perf_config_bool(var, value);
+
 
 	return 0;
 }
@@ -2464,6 +2470,9 @@ static struct record record = {
 		},
 		.mmap_flush          = MMAP_FLUSH_DEFAULT,
 		.nr_threads_synthesize = 1,
+		.nr_threads          = 1,
+		.multithreaded_evlist = true,
+		.multithreaded_synthesis = true,
 		.ctl_fd              = -1,
 		.ctl_fd_ack          = -1,
 		.synth               = PERF_SYNTH_ALL,
@@ -2671,6 +2680,9 @@ static struct option __record_options[] = {
 	OPT_UINTEGER(0, "num-thread-synthesize",
 		     &record.opts.nr_threads_synthesize,
 		     "number of threads to run for event synthesis"),
+	OPT_UINTEGER_OPTARG(0, "threads",
+		     &record.opts.nr_threads, UINT_MAX,
+		     "number of threads to use"),
 #ifdef HAVE_LIBPFM
 	OPT_CALLBACK(0, "pfm-events", &record.evlist, "event",
 		"libpfm4 event selector. use 'perf list' to list available events",
@@ -2959,10 +2971,19 @@ int cmd_record(int argc, const char **argv)
 		rec->opts.comp_level = comp_level_max;
 	pr_debug("comp level: %d\n", rec->opts.comp_level);
 
-	if (rec->opts.nr_threads_synthesize == UINT_MAX)
-		rec->opts.nr_threads_synthesize = sysconf(_SC_NPROCESSORS_ONLN);
-	if (rec->opts.nr_threads_synthesize > 1) {
-		err = setup_global_workqueue(rec->opts.nr_threads_synthesize);
+	if (rec->opts.nr_threads <= 1) {
+		rec->opts.multithreaded_evlist = false;
+		if (rec->opts.nr_threads_synthesize > 1) {
+			rec->opts.multithreaded_synthesis = true;
+			rec->opts.nr_threads = rec->opts.nr_threads_synthesize;
+		} else {
+			rec->opts.multithreaded_synthesis = false;
+		}
+	}
+	if (rec->opts.nr_threads == UINT_MAX)
+		rec->opts.nr_threads = sysconf(_SC_NPROCESSORS_ONLN);
+	if (rec->opts.nr_threads > 1) {
+		err = setup_global_workqueue(rec->opts.nr_threads);
 		if (err) {
 			create_workqueue_strerror(global_wq, errbuf, sizeof(errbuf));
 			pr_err("setup_global_workqueue: %s\n", errbuf);
@@ -2972,7 +2993,7 @@ int cmd_record(int argc, const char **argv)
 
 	err = __cmd_record(&record, argc, argv);
 
-	if (rec->opts.nr_threads_synthesize > 1)
+	if (rec->opts.nr_threads > 1)
 		teardown_global_workqueue();
 out:
 	bitmap_free(rec->affinity_mask.bits);
