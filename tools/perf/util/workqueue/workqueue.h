@@ -30,6 +30,13 @@ extern int flush_workqueue(struct workqueue_struct *wq);
 
 extern void init_work(struct work_struct *work);
 
+/* parallel_for utility */
+
+typedef void (*parallel_for_func_t)(int i, void *args);
+
+extern int parallel_for(struct workqueue_struct *wq, int from, int to, int work_size,
+			parallel_for_func_t func, void *args);
+
 /* Global workqueue */
 
 extern struct workqueue_struct *global_wq;
