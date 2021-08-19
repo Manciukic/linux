@@ -486,41 +486,44 @@ int evlist__for_each_evsel_cpu(struct evlist *evlist, evsel__cpu_func func, void
 
 }
 
+struct evlist_disable_args {
+	char *evsel_name;
+	int imm;
+};
+
+static int __evlist__disable_evsel_cpu_func(struct evlist *evlist __maybe_unused,
+					struct evsel *pos, int cpu, void *_args)
+{
+	int ret = 0;
+	struct evlist_disable_args *args = _args;
+
+	if (evsel__strcmp(pos, args->evsel_name))
+		return 0;
+	if (pos->disabled || !evsel__is_group_leader(pos) || !pos->core.fd)
+		return 0;
+	if (pos->immediate)
+		ret = 1;
+	if (pos->immediate != args->imm)
+		return ret;
+	evsel__disable_cpu(pos, cpu);
+
+	return ret;
+}
+
+
 static void __evlist__disable(struct evlist *evlist, char *evsel_name)
 {
 	struct evsel *pos;
-	struct affinity affinity;
-	int cpu, i, imm = 0, cpu_idx;
-	bool has_imm = false;
-
-	if (affinity__setup(&affinity) < 0)
-		return;
+	int ret;
+	struct evlist_disable_args args = { .evsel_name = evsel_name };
 
 	/* Disable 'immediate' events last */
-	for (imm = 0; imm <= 1; imm++) {
-		evlist__for_each_cpu(evlist, i, cpu) {
-			affinity__set(&affinity, cpu);
-
-			evlist__for_each_entry(evlist, pos) {
-				if (evsel__strcmp(pos, evsel_name))
-					continue;
-				cpu_idx = evsel__find_cpu(pos, cpu);
-				if (cpu_idx < 0)
-					continue;
-				if (pos->disabled || !evsel__is_group_leader(pos) || !pos->core.fd)
-					continue;
-				if (pos->immediate)
-					has_imm = true;
-				if (pos->immediate != imm)
-					continue;
-				evsel__disable_cpu(pos, cpu_idx);
-			}
-		}
-		if (!has_imm)
+	for (args.imm = 0; args.imm <= 1; args.imm++) {
+		ret = evlist__for_each_evsel_cpu(evlist, __evlist__disable_evsel_cpu_func, &args);
+		if (!ret)	// does not have immediate evsels
 			break;
 	}
 
-	affinity__cleanup(&affinity);
 	evlist__for_each_entry(evlist, pos) {
 		if (evsel__strcmp(pos, evsel_name))
 			continue;
