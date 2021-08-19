@@ -1490,8 +1490,7 @@ static int record__synthesize(struct record *rec, bool tail)
 
 		err = __machine__synthesize_threads(machine, tool, &opts->target,
 						    rec->evlist->core.threads,
-						    f, needs_mmap, opts->sample_address,
-						    rec->opts.nr_threads_synthesize);
+						    f, needs_mmap, opts->sample_address);
 	}
 
 	if (rec->opts.nr_threads_synthesize > 1)
