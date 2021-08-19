@@ -147,6 +147,28 @@ out:
 	return ret;
 }
 
+struct test_work {
+	struct work_struct work;
+	int i;
+	int *array;
+};
+
+static void test_work_fn1(struct work_struct *work)
+{
+	struct test_work *mwork = container_of(work, struct test_work, work);
+
+	dummy_work(mwork->i);
+	mwork->array[mwork->i] = mwork->i+1;
+}
+
+static void test_work_fn2(struct work_struct *work)
+{
+	struct test_work *mwork = container_of(work, struct test_work, work);
+
+	dummy_work(mwork->i);
+	mwork->array[mwork->i] = mwork->i*2;
+}
+
 static int __workqueue__prepare(struct workqueue_struct **wq,
 				int pool_size)
 {
@@ -166,21 +188,68 @@ static int __workqueue__teardown(struct workqueue_struct *wq)
 	return 0;
 }
 
+static int __workqueue__exec_wait(struct workqueue_struct *wq,
+				int *array, struct test_work *works,
+				work_func_t func, int n_work_items)
+{
+	int ret, i;
+
+	for (i = 0; i < n_work_items; i++) {
+		works[i].array = array;
+		works[i].i = i;
+
+		init_work(&works[i].work);
+		works[i].work.func = func;
+		queue_work(wq, &works[i].work);
+	}
+
+	ret = flush_workqueue(wq);
+	TEST_ASSERT_VAL("workqueue flush failure", ret == 0);
+
+	return TEST_OK;
+}
+
+
 static int __test__workqueue(void *_args)
 {
 	struct workqueue_test_args_t *args = _args;
 	struct workqueue_struct *wq;
+	struct test_work *works;
+	int *array;
 	int pool_size = args->pool_size ?: sysconf(_SC_NPROCESSORS_ONLN);
-	int ret = __workqueue__prepare(&wq, pool_size);
+	int i, ret = __workqueue__prepare(&wq, pool_size);
 
 	if (ret)
+		return ret;
+
+	array = calloc(args->n_work_items, sizeof(*array));
+	TEST_ASSERT_VAL("failed array calloc", array);
+	works = calloc(args->n_work_items, sizeof(*works));
+	TEST_ASSERT_VAL("failed works calloc", works);
+
+	ret = __workqueue__exec_wait(wq, array, works, test_work_fn1,
+					args->n_work_items);
+	if (ret)
 		goto out;
+
+	for (i = 0; i < args->n_work_items; i++)
+		TEST_ASSERT_VAL("failed array check (1)", array[i] == i+1);
+
+	ret = __workqueue__exec_wait(wq, array, works, test_work_fn2,
+					args->n_work_items);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < args->n_work_items; i++)
+		TEST_ASSERT_VAL("failed array check (2)", array[i] == 2*i);
 
 	ret = __workqueue__teardown(wq);
 	if (ret)
 		goto out;
 
 out:
+	free(array);
+	free(works);
 	return ret;
 }
 

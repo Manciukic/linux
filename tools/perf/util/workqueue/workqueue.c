@@ -38,6 +38,7 @@ struct workqueue_struct {
 	struct list_head	idle_list;	/* idle workers */
 	int			msg_pipe[2];	/* main thread comm pipes */
 	struct worker		**workers;	/* array of all workers */
+	struct worker		*next_worker;	/* next worker to choose (round robin) */
 };
 
 static const char * const workqueue_errno_str[] = {
@@ -48,6 +49,8 @@ static const char * const workqueue_errno_str[] = {
 	"Error sending message to worker",
 	"Error receiving message from worker",
 	"Received unexpected message from worker",
+	"Worker is not ready",
+	"Worker is in an unrecognized status",
 };
 
 struct worker {
@@ -92,6 +95,15 @@ __releases(&worker->lock)
 {
 	__release(&worker->lock);
 	return pthread_mutex_unlock(&worker->lock);
+}
+
+static void advance_next_worker(struct workqueue_struct *wq)
+__must_hold(&wq->lock)
+{
+	if (list_is_last(&wq->next_worker->entry, &wq->busy_list))
+		wq->next_worker = list_first_entry(&wq->busy_list, struct worker, entry);
+	else
+		wq->next_worker = list_next_entry(wq->next_worker, entry);
 }
 
 /**
@@ -159,9 +171,13 @@ static void sleep_worker(struct workqueue_struct *wq, struct worker *worker)
 __must_hold(&wq->lock)
 {
 	worker->status = WORKER_STATUS__IDLE;
+	if (wq->next_worker == worker)
+		advance_next_worker(wq);
 	list_move(&worker->entry, &wq->idle_list);
-	if (list_empty(&wq->busy_list))
+	if (list_empty(&wq->busy_list)) {
+		wq->next_worker = NULL;
 		pthread_cond_signal(&wq->idle_cond);
+	}
 }
 
 /**
@@ -196,6 +212,52 @@ __must_hold(&worker->lock)
 	}
 }
 
+/**
+ * wake_worker - prepare for waking worker @worker of workqueue @wq assigning @work to do
+ *
+ * Called from main thread.
+ * Moves worker from idle to busy list and assigns @work to it.
+ * Must call wake_worker outside critical section afterwards.
+ */
+static int prepare_wake_worker(struct workqueue_struct *wq, struct worker *worker,
+			struct work_struct *work)
+__must_hold(&wq->lock)
+__must_hold(&worker->lock)
+{
+	if (wq->next_worker)
+		list_move_tail(&worker->entry, &wq->next_worker->entry);
+	else
+		list_move(&worker->entry, &wq->busy_list);
+	wq->next_worker = worker;
+
+	list_add_tail(&work->entry, &worker->queue);
+	worker->status = WORKER_STATUS__BUSY;
+
+	return 0;
+}
+
+/**
+ * wake_worker - send wake message to worker @worker of workqueue @wq
+ *
+ * Called from main thread.
+ * Must be called after prepare_wake_worker and outside critical section to
+ * reduce time spent inside it
+ */
+static int wake_worker(struct worker *worker)
+{
+	enum worker_msg msg = WORKER_MSG__WAKE;
+	int ret;
+	char sbuf[STRERR_BUFSIZE];
+
+	ret = writen(worker->msg_pipe[1], &msg, sizeof(msg));
+	if (ret < 0) {
+		pr_debug2("wake worker %d: error seding msg: %s\n",
+			worker->tidx, str_error_r(errno, sbuf, sizeof(sbuf)));
+		return -WORKQUEUE_ERROR__WRITEPIPE;
+	}
+
+	return 0;
+}
 
 /**
  * stop_worker - stop worker @worker
@@ -418,6 +480,8 @@ struct workqueue_struct *create_workqueue(int nr_threads)
 			goto out_stop_pool;
 	}
 
+	wq->next_worker = NULL;
+
 	return wq;
 
 out_stop_pool:
@@ -532,6 +596,8 @@ int workqueue_strerror(struct workqueue_struct *wq, int err, char *buf, size_t s
 		emsg = str_error_r(errno, sbuf, sizeof(sbuf));
 		return scnprintf(buf, size, "%s: %s.\n", errno_str, emsg);
 	case -WORKQUEUE_ERROR__INVALIDMSG:
+	case -WORKQUEUE_ERROR__INVALIDWORKERSTATUS:
+	case -WORKQUEUE_ERROR__NOTREADY:
 		return scnprintf(buf, size, "%s.\n", errno_str);
 	default:
 		emsg = str_error_r(err, sbuf, sizeof(sbuf));
@@ -565,4 +631,112 @@ int destroy_workqueue_strerror(int err, char *buf, size_t size)
 int workqueue_nr_threads(struct workqueue_struct *wq)
 {
 	return threadpool__size(wq->pool);
+}
+
+/**
+ * __queue_work_on_worker - add @work to the internal queue of worker @worker
+ *
+ * NB: this function releases the locks to be able to send notification to
+ * thread outside the critical section.
+ */
+static int __queue_work_on_worker(struct workqueue_struct *wq __maybe_unused,
+				struct worker *worker, struct work_struct *work)
+__must_hold(&wq->lock)
+__must_hold(&worker->lock)
+__releases(&wq->lock)
+__releases(&worker->lock)
+{
+	int ret;
+
+	switch (worker->status) {
+	case WORKER_STATUS__BUSY:
+		list_add_tail(&work->entry, &worker->queue);
+
+		unlock_worker(worker);
+		unlock_workqueue(wq);
+		pr_debug("workqueue: queued new work item\n");
+		return 0;
+	case WORKER_STATUS__IDLE:
+		ret = prepare_wake_worker(wq, worker, work);
+		unlock_worker(worker);
+		unlock_workqueue(wq);
+		if (ret)
+			return ret;
+		ret = wake_worker(worker);
+		if (!ret)
+		pr_debug("workqueue: woke worker %d\n", worker->tidx);
+		return ret;
+	default:
+	case WORKER_STATUS__MAX:
+		unlock_worker(worker);
+		unlock_workqueue(wq);
+		pr_debug2("workqueue: worker is in unrecognized status %d\n",
+			worker->status);
+		return -WORKQUEUE_ERROR__INVALIDWORKERSTATUS;
+	}
+
+	return 0;
+}
+
+/**
+ * queue_work - add @work to @wq internal queue
+ *
+ * If there are idle threads, one of these will be woken up.
+ * Otherwise, the work is added to the pending list.
+ */
+int queue_work(struct workqueue_struct *wq, struct work_struct *work)
+{
+	struct worker *worker;
+
+	lock_workqueue(wq);
+	if (list_empty(&wq->idle_list)) {
+		worker = wq->next_worker;
+		advance_next_worker(wq);
+	} else {
+		worker = list_first_entry(&wq->idle_list, struct worker, entry);
+	}
+	lock_worker(worker);
+
+	return __queue_work_on_worker(wq, worker, work);
+}
+
+/**
+ * queue_work_on_worker - add @work to worker @tidx internal queue
+ */
+int queue_work_on_worker(int tidx, struct workqueue_struct *wq, struct work_struct *work)
+{
+	lock_workqueue(wq);
+	lock_worker(wq->workers[tidx]);
+	return __queue_work_on_worker(wq, wq->workers[tidx], work);
+}
+
+/**
+ * flush_workqueue - wait for all currently executed and pending work to finish
+ *
+ * This function blocks until all threads become idle.
+ */
+int flush_workqueue(struct workqueue_struct *wq)
+{
+	int err = 0, ret;
+
+	lock_workqueue(wq);
+	while (!list_empty(&wq->busy_list)) {
+		ret = pthread_cond_wait(&wq->idle_cond, &wq->lock);
+		if (ret) {
+			pr_debug2("%s: error in pthread_cond_wait\n", __func__);
+			err = -ret;
+			break;
+		}
+	}
+	unlock_workqueue(wq);
+
+	return err;
+}
+
+/**
+ * init_work - initialize the @work struct
+ */
+void init_work(struct work_struct *work)
+{
+	INIT_LIST_HEAD(&work->entry);
 }
