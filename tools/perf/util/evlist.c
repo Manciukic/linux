@@ -1340,11 +1340,17 @@ void evlist__set_selected(struct evlist *evlist, struct evsel *evsel)
 	evlist->selected = evsel;
 }
 
+static int __evlist__close_evsel_cpu_func(struct evlist *evlist __maybe_unused,
+					struct evsel *evsel, int cpu,
+					void *args __maybe_unused)
+{
+	perf_evsel__close_cpu(&evsel->core, cpu);
+	return 0;
+}
+
 void evlist__close(struct evlist *evlist)
 {
 	struct evsel *evsel;
-	struct affinity affinity;
-	int cpu, i, cpu_idx;
 
 	/*
 	 * With perf record core.cpus is usually NULL.
@@ -1356,19 +1362,8 @@ void evlist__close(struct evlist *evlist)
 		return;
 	}
 
-	if (affinity__setup(&affinity) < 0)
-		return;
-	evlist__for_each_cpu(evlist, i, cpu) {
-		affinity__set(&affinity, cpu);
+	evlist__for_each_evsel_cpu(evlist, __evlist__close_evsel_cpu_func, NULL);
 
-		evlist__for_each_entry_reverse(evlist, evsel) {
-			cpu_idx = evsel__find_cpu(evsel, cpu);
-			if (cpu_idx < 0)
-				continue;
-			perf_evsel__close_cpu(&evsel->core, cpu_idx);
-		}
-	}
-	affinity__cleanup(&affinity);
 	evlist__for_each_entry_reverse(evlist, evsel) {
 		perf_evsel__free_fd(&evsel->core);
 		perf_evsel__free_id(&evsel->core);
