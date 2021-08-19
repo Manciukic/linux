@@ -25,11 +25,17 @@
 static int iterations = 100;
 static int nr_events = 1;
 static const char *event_string = "dummy";
+static bool detail;
 
 static inline u64 timeval2usec(struct timeval *tv)
 {
 	return tv->tv_sec * USEC_PER_SEC + tv->tv_usec;
 }
+
+struct timers {
+	struct timeval start, end, diff;
+	struct stats init, open, mmap, enable, disable, munmap, close, fini;
+};
 
 static struct record_opts opts = {
 	.sample_time	     = true,
@@ -60,6 +66,7 @@ static const struct option options[] = {
 	OPT_STRING('u', "uid", &opts.target.uid_str, "user", "user to profile"),
 	OPT_BOOLEAN(0, "per-thread", &opts.target.per_thread, "use per-thread mmaps"),
 	OPT_UINTEGER_OPTARG('j', "threads", &opts.nr_threads, UINT_MAX, "Number of threads to use"),
+	OPT_BOOLEAN('d', "detail", &detail, "compute time taken by single functions"),
 	OPT_END()
 };
 
@@ -113,10 +120,27 @@ out_delete_evlist:
 	return NULL;
 }
 
-static int bench__do_evlist_open_close(struct evlist *evlist)
+#define START_TIMER(timers) do { \
+	if (detail) { \
+		gettimeofday(&(timers)->start, NULL); \
+	} \
+} while (0)
+
+#define RECORD_TIMER(timers, field) do { \
+	if (detail) { \
+		gettimeofday(&(timers)->end, NULL); \
+		timersub(&(timers)->end, &(timers)->start, &(timers)->diff); \
+		update_stats(&(timers)->field, timeval2usec(&(timers)->diff)); \
+		(timers)->start = (timers)->end; \
+	} \
+} while (0)
+
+static int bench__do_evlist_open_close(struct evlist *evlist, struct timers *timers)
 {
 	char sbuf[WORKQUEUE_STRERR_BUFSIZE];
 	int err = -1, ret;
+
+	START_TIMER(timers);
 
 	if (opts.nr_threads > 1) {
 		err = setup_global_workqueue(opts.nr_threads);
@@ -130,23 +154,30 @@ static int bench__do_evlist_open_close(struct evlist *evlist)
 
 		perf_set_multithreaded();
 	}
+	RECORD_TIMER(timers, init);
 
 	err = evlist__open(evlist);
 	if (err < 0) {
 		pr_err("evlist__open: %s\n", str_error_r(errno, sbuf, sizeof(sbuf)));
 		goto out;
 	}
+	RECORD_TIMER(timers, open);
 
 	err = evlist__mmap(evlist, opts.mmap_pages);
 	if (err < 0) {
 		pr_err("evlist__mmap: %s\n", str_error_r(errno, sbuf, sizeof(sbuf)));
 		goto out;
 	}
+	RECORD_TIMER(timers, mmap);
 
 	evlist__enable(evlist);
+	RECORD_TIMER(timers, enable);
 	evlist__disable(evlist);
+	RECORD_TIMER(timers, disable);
 	evlist__munmap(evlist);
+	RECORD_TIMER(timers, munmap);
 	evlist__close(evlist);
+	RECORD_TIMER(timers, close);
 
 out:
 	if (opts.nr_threads > 1) {
@@ -159,9 +190,14 @@ out:
 
 		perf_set_singlethreaded();
 	}
+	RECORD_TIMER(timers, fini);
 
 	return err;
 }
+
+#define PRINT_TIMER(timers, field) \
+	printf("%20s took: %12.3f usec (+- %12.3f usec)\n", #field, \
+		avg_stats(&(timers)->field), stddev_stats(&(timers)->field))
 
 static int bench_evlist_open_close__run(char *evstr)
 {
@@ -172,9 +208,20 @@ static int bench_evlist_open_close__run(char *evstr)
 	struct stats time_stats;
 	u64 runtime_us;
 	int i, err;
+	struct timers timers;
 
 	if (!evlist)
 		return -ENOMEM;
+
+	init_stats(&time_stats);
+	init_stats(&timers.init);
+	init_stats(&timers.open);
+	init_stats(&timers.mmap);
+	init_stats(&timers.enable);
+	init_stats(&timers.disable);
+	init_stats(&timers.munmap);
+	init_stats(&timers.close);
+	init_stats(&timers.fini);
 
 	init_stats(&time_stats);
 
@@ -194,7 +241,7 @@ static int bench_evlist_open_close__run(char *evstr)
 			return -ENOMEM;
 
 		gettimeofday(&start, NULL);
-		err = bench__do_evlist_open_close(evlist);
+		err = bench__do_evlist_open_close(evlist, &timers);
 		if (err) {
 			evlist__delete(evlist);
 			return err;
@@ -211,7 +258,17 @@ static int bench_evlist_open_close__run(char *evstr)
 
 	time_average = avg_stats(&time_stats);
 	time_stddev = stddev_stats(&time_stats);
-	printf("  Average open-close took: %.3f usec (+- %.3f usec)\n", time_average, time_stddev);
+	printf("  Average open-close took: %12.3f usec (+- %12.3f usec)\n", time_average, time_stddev);
+	if (detail) {
+		PRINT_TIMER(&timers, init);
+		PRINT_TIMER(&timers, open);
+		PRINT_TIMER(&timers, mmap);
+		PRINT_TIMER(&timers, enable);
+		PRINT_TIMER(&timers, disable);
+		PRINT_TIMER(&timers, munmap);
+		PRINT_TIMER(&timers, close);
+		PRINT_TIMER(&timers, fini);
+	}
 
 	return 0;
 }
