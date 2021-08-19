@@ -363,4 +363,18 @@ struct evsel *evlist__find_evsel(struct evlist *evlist, int idx);
 
 int evlist__scnprintf_evsels(struct evlist *evlist, size_t size, char *bf);
 void evlist__check_mem_load_aux(struct evlist *evlist);
+
+/**
+ * evsel__cpu_func - function to run on each evsel for each cpu
+ * @evlist: the parent evlist
+ * @evsel: the processed evsel
+ * @cpu: index of the cpu in evsel->core.cpus
+ * @args: additional custom arguments
+ *
+ * Returns:
+ * A negative value is considered as an error.
+ * A positive value will be propagated to evlist__for_each_evsel_cpu.
+ */
+typedef int (*evsel__cpu_func)(struct evlist *evlist, struct evsel *evsel, int cpu, void *args);
+int evlist__for_each_evsel_cpu(struct evlist *evlist, evsel__cpu_func func, void *args);
 #endif /* __PERF_EVLIST_H */

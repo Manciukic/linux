@@ -27,6 +27,8 @@
 #include "util/perf_api_probe.h"
 #include "util/evsel_fprintf.h"
 #include "util/evlist-hybrid.h"
+#include "util/util.h"
+#include "util/workqueue/workqueue.h"
 #include <signal.h>
 #include <unistd.h>
 #include <sched.h>
@@ -41,6 +43,7 @@
 #include <sys/prctl.h>
 
 #include <linux/bitops.h>
+#include <linux/kernel.h>
 #include <linux/hash.h>
 #include <linux/log2.h>
 #include <linux/err.h>
@@ -367,6 +370,120 @@ static int evlist__is_enabled(struct evlist *evlist)
 			return true;
 	}
 	return false;
+}
+
+struct evlist_work {
+	struct work_struct work;
+	struct evlist *evlist;
+	int cpu;
+	evsel__cpu_func func;
+	void *args;
+	int ret;
+};
+
+static void evlist__for_each_evsel_cpu_thread_func(struct work_struct *_work)
+{
+	struct evlist_work *work = container_of(_work, struct evlist_work, work);
+	int cpu_idx, ret, err = 0;
+	struct evsel *pos;
+
+	work->ret = 0;
+	evlist__for_each_entry(work->evlist, pos) {
+		cpu_idx = evsel__find_cpu(pos, work->cpu);
+		if (cpu_idx < 0)
+			continue;
+		ret = work->func(work->evlist, pos, cpu_idx, work->args);
+		if (ret) {
+			work->ret = ret;
+			if (err < 0)		// error
+				return;
+		}
+	}
+}
+
+static int evlist__for_each_evsel_cpu_multithreaded(struct evlist *evlist,
+					evsel__cpu_func func, void *args)
+{
+	int i, cpu, ret;
+	struct evlist_work *works;
+	char errbuf[WORKQUEUE_STRERR_BUFSIZE];
+
+	works = calloc(perf_cpu_map__nr(evlist->core.all_cpus), sizeof(*works));
+	perf_cpu_map__for_each_cpu(cpu, i, evlist->core.all_cpus) {
+		init_work(&works[i].work);
+		works[i].evlist = evlist;
+		works[i].work.func = evlist__for_each_evsel_cpu_thread_func;
+		works[i].cpu = cpu;
+		works[i].func = func;
+		works[i].args = args;
+		works[i].ret = 0;
+
+		ret = schedule_work_on(cpu, &works[i].work);
+		if (ret) {
+			workqueue_strerror(global_wq, ret, errbuf, sizeof(errbuf));
+			pr_debug("schedule_work: %s\n", errbuf);
+			break;
+		}
+	}
+
+	ret = flush_scheduled_work();
+	if (ret) {
+		workqueue_strerror(global_wq, ret, errbuf, sizeof(errbuf));
+		pr_debug("flush_scheduled_work: %s\n", errbuf);
+		goto out;
+	}
+
+	perf_cpu_map__for_each_cpu(cpu, i, evlist->core.all_cpus) {
+		if (works[i].ret) {
+			ret = works[i].ret;
+			if (works[i].ret < 0)		// error
+				goto out;
+		}
+	}
+out:
+	free(works);
+
+	return ret;
+}
+
+static int evlist__for_each_evsel_cpu_singlethreaded(struct evlist *evlist,
+					evsel__cpu_func func, void *args)
+{
+	int ret, err = 0, i, cpu, cpu_idx;
+	struct affinity affinity;
+	struct evsel *pos;
+
+	if (affinity__setup(&affinity) < 0)
+		return -1;
+
+	evlist__for_each_cpu(evlist, i, cpu) {
+		affinity__set(&affinity, cpu);
+
+		evlist__for_each_entry(evlist, pos) {
+			cpu_idx = evsel__find_cpu(pos, cpu);
+			if (cpu_idx < 0)
+				continue;
+			ret = func(evlist, pos, cpu_idx, args);
+			if (ret) {
+				err = ret;
+				if (err < 0)		// error
+					goto out;
+			}
+		}
+	}
+
+out:
+	affinity__cleanup(&affinity);
+	return err;
+}
+
+int evlist__for_each_evsel_cpu(struct evlist *evlist, evsel__cpu_func func, void *args)
+{
+	if (perf_singlethreaded)
+		return evlist__for_each_evsel_cpu_singlethreaded(evlist, func, args);
+	else
+		return evlist__for_each_evsel_cpu_multithreaded(evlist, func, args);
+
 }
 
 static void __evlist__disable(struct evlist *evlist, char *evsel_name)
