@@ -28,6 +28,11 @@ extern int queue_work_on_worker(int tidx, struct workqueue_struct *wq, struct wo
 
 extern int flush_workqueue(struct workqueue_struct *wq);
 
+extern int workqueue_set_affinities(struct workqueue_struct *wq,
+				struct mmap_cpu_mask *affinities);
+extern int workqueue_set_affinity(struct workqueue_struct *wq, int tidx,
+				struct mmap_cpu_mask *affinity);
+
 extern void init_work(struct work_struct *work);
 
 /* parallel_for utility */
@@ -92,6 +97,7 @@ enum {
 	WORKQUEUE_ERROR__POOLEXE,
 	WORKQUEUE_ERROR__POOLSTOP,
 	WORKQUEUE_ERROR__POOLSTARTTHREAD,
+	WORKQUEUE_ERROR__POOLAFFINITY,
 	WORKQUEUE_ERROR__WRITEPIPE,
 	WORKQUEUE_ERROR__READPIPE,
 	WORKQUEUE_ERROR__INVALIDMSG,
