@@ -23,6 +23,7 @@
 #include <linux/string.h>
 #include <linux/zalloc.h>
 #include <linux/perf_event.h>
+#include <linux/err.h>
 #include <asm/bug.h>
 #include <perf/evsel.h>
 #include <perf/cpumap.h>
@@ -42,6 +43,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "util/workqueue/workqueue.h"
+#include "util/util.h"
 
 #define DEFAULT_PROC_MAP_PARSE_TIMEOUT 500
 
@@ -883,16 +886,13 @@ static int __perf_event__synthesize_threads(struct perf_tool *tool,
 					    perf_event__handler_t process,
 					    struct machine *machine,
 					    bool mmap_data,
-					    struct dirent **dirent,
-					    int start,
-					    int num)
+					    char *d_name)
 {
 	union perf_event *comm_event, *mmap_event, *fork_event;
 	union perf_event *namespaces_event;
 	int err = -1;
 	char *end;
 	pid_t pid;
-	int i;
 
 	comm_event = malloc(sizeof(comm_event->comm) + machine->id_hdr_size);
 	if (comm_event == NULL)
@@ -912,24 +912,22 @@ static int __perf_event__synthesize_threads(struct perf_tool *tool,
 	if (namespaces_event == NULL)
 		goto out_free_fork;
 
-	for (i = start; i < start + num; i++) {
-		if (!isdigit(dirent[i]->d_name[0]))
-			continue;
+	if (!isdigit(d_name[0]))
+		goto out_free_namespaces;
 
-		pid = (pid_t)strtol(dirent[i]->d_name, &end, 10);
-		/* only interested in proper numerical dirents */
-		if (*end)
-			continue;
-		/*
-		 * We may race with exiting thread, so don't stop just because
-		 * one thread couldn't be synthesized.
-		 */
-		__event__synthesize_thread(comm_event, mmap_event, fork_event,
-					   namespaces_event, pid, 1, process,
-					   tool, machine, mmap_data);
-	}
+	pid = (pid_t)strtol(d_name, &end, 10);
+	/* only interested in proper numerical dirents */
+	if (*end)
+		goto out_free_namespaces;
+	/*
+	 * We may race with exiting thread, so don't stop just because
+	 * one thread couldn't be synthesized.
+	 */
+	__event__synthesize_thread(comm_event, mmap_event, fork_event,
+					namespaces_event, pid, 1, process,
+					tool, machine, mmap_data);
 	err = 0;
-
+out_free_namespaces:
 	free(namespaces_event);
 out_free_fork:
 	free(fork_event);
@@ -947,36 +945,28 @@ struct synthesize_threads_arg {
 	struct machine *machine;
 	bool mmap_data;
 	struct dirent **dirent;
-	int num;
-	int start;
 };
 
-static void *synthesize_threads_worker(void *arg)
+static void synthesize_threads_worker(int i, void *arg)
 {
 	struct synthesize_threads_arg *args = arg;
 
 	__perf_event__synthesize_threads(args->tool, args->process,
 					 args->machine, args->mmap_data,
-					 args->dirent,
-					 args->start, args->num);
-	return NULL;
+					 args->dirent[i]->d_name);
 }
 
 int perf_event__synthesize_threads(struct perf_tool *tool,
 				   perf_event__handler_t process,
 				   struct machine *machine,
-				   bool mmap_data,
-				   unsigned int nr_threads_synthesize)
+				   bool mmap_data)
 {
-	struct synthesize_threads_arg *args = NULL;
-	pthread_t *synthesize_threads = NULL;
+	struct synthesize_threads_arg args;
 	char proc_path[PATH_MAX];
 	struct dirent **dirent;
-	int num_per_thread;
-	int m, n, i, j;
-	int thread_nr;
-	int base = 0;
-	int err = -1;
+	int n, i;
+	int err = -1, ret;
+	char err_buf[WORKQUEUE_STRERR_BUFSIZE];
 
 
 	if (machine__is_default_guest(machine))
@@ -987,60 +977,27 @@ int perf_event__synthesize_threads(struct perf_tool *tool,
 	if (n < 0)
 		return err;
 
-	if (nr_threads_synthesize == UINT_MAX)
-		thread_nr = sysconf(_SC_NPROCESSORS_ONLN);
-	else
-		thread_nr = nr_threads_synthesize;
-
-	if (thread_nr <= 1) {
-		err = __perf_event__synthesize_threads(tool, process,
-						       machine, mmap_data,
-						       dirent, base, n);
+	if (perf_singlethreaded) {
+		for (i = 0; i < n; i++)
+			err = __perf_event__synthesize_threads(tool, process,
+								machine, mmap_data,
+								dirent[i]->d_name);
 		goto free_dirent;
 	}
-	if (thread_nr > n)
-		thread_nr = n;
 
-	synthesize_threads = calloc(sizeof(pthread_t), thread_nr);
-	if (synthesize_threads == NULL)
-		goto free_dirent;
+	args.tool = tool;
+	args.process = process;
+	args.machine = machine;
+	args.mmap_data = mmap_data;
+	args.dirent = dirent;
 
-	args = calloc(sizeof(*args), thread_nr);
-	if (args == NULL)
-		goto free_threads;
-
-	num_per_thread = n / thread_nr;
-	m = n % thread_nr;
-	for (i = 0; i < thread_nr; i++) {
-		args[i].tool = tool;
-		args[i].process = process;
-		args[i].machine = machine;
-		args[i].mmap_data = mmap_data;
-		args[i].dirent = dirent;
-	}
-	for (i = 0; i < m; i++) {
-		args[i].num = num_per_thread + 1;
-		args[i].start = i * args[i].num;
-	}
-	if (i != 0)
-		base = args[i-1].start + args[i-1].num;
-	for (j = i; j < thread_nr; j++) {
-		args[j].num = num_per_thread;
-		args[j].start = base + (j - i) * args[i].num;
+	err = parallel_for(global_wq, 0, n, 1, synthesize_threads_worker, &args);
+	if (err) {
+		ret = workqueue_strerror(global_wq, err, err_buf, sizeof(err_buf));
+		pr_err("parallel_for: %s\n",
+			ret <= 0 ? "Error generating error msg" : err_buf);
 	}
 
-	for (i = 0; i < thread_nr; i++) {
-		if (pthread_create(&synthesize_threads[i], NULL,
-				   synthesize_threads_worker, &args[i]))
-			goto out_join;
-	}
-	err = 0;
-out_join:
-	for (i = 0; i < thread_nr; i++)
-		pthread_join(synthesize_threads[i], NULL);
-	free(args);
-free_threads:
-	free(synthesize_threads);
 free_dirent:
 	for (i = 0; i < n; i++)
 		zfree(&dirent[i]);
@@ -1775,26 +1732,22 @@ out_err:
 
 int __machine__synthesize_threads(struct machine *machine, struct perf_tool *tool,
 				  struct target *target, struct perf_thread_map *threads,
-				  perf_event__handler_t process, bool data_mmap,
-				  unsigned int nr_threads_synthesize)
+				  perf_event__handler_t process, bool data_mmap)
 {
 	if (target__has_task(target))
 		return perf_event__synthesize_thread_map(tool, threads, process, machine, data_mmap);
 	else if (target__has_cpu(target))
 		return perf_event__synthesize_threads(tool, process,
-						      machine, data_mmap,
-						      nr_threads_synthesize);
+						      machine, data_mmap);
 	/* command specified */
 	return 0;
 }
 
 int machine__synthesize_threads(struct machine *machine, struct target *target,
-				struct perf_thread_map *threads, bool data_mmap,
-				unsigned int nr_threads_synthesize)
+				struct perf_thread_map *threads, bool data_mmap)
 {
 	return __machine__synthesize_threads(machine, NULL, target, threads,
-					     perf_event__process, data_mmap,
-					     nr_threads_synthesize);
+					     perf_event__process, data_mmap);
 }
 
 static struct perf_record_event_update *event_update_event__new(size_t size, u64 type, u64 id)

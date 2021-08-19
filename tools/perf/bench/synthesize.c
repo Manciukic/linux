@@ -63,7 +63,6 @@ static int do_run_single_threaded(struct perf_session *session,
 				struct perf_thread_map *threads,
 				struct target *target, bool data_mmap)
 {
-	const unsigned int nr_threads_synthesize = 1;
 	struct timeval start, end, diff;
 	u64 runtime_us;
 	unsigned int i;
@@ -81,8 +80,7 @@ static int do_run_single_threaded(struct perf_session *session,
 						NULL,
 						target, threads,
 						process_synthesized_event,
-						data_mmap,
-						nr_threads_synthesize);
+						data_mmap);
 		if (err)
 			return err;
 
@@ -148,8 +146,7 @@ err_out:
 	return err;
 }
 
-static int do_run_multi_threaded(struct target *target,
-				unsigned int nr_threads_synthesize)
+static int do_run_multi_threaded(struct target *target)
 {
 	struct timeval start, end, diff;
 	u64 runtime_us;
@@ -172,8 +169,7 @@ static int do_run_multi_threaded(struct target *target,
 						NULL,
 						target, NULL,
 						process_synthesized_event,
-						false,
-						nr_threads_synthesize);
+						false);
 		if (err) {
 			perf_session__delete(session);
 			return err;
@@ -236,7 +232,7 @@ static int run_multi_threaded(void)
 		printf("  Number of synthesis threads: %u\n",
 			nr_threads_synthesize);
 
-		err = do_run_multi_threaded(&target, nr_threads_synthesize);
+		err = do_run_multi_threaded(&target);
 		if (err)
 			return err;
 
