@@ -16,6 +16,7 @@
 #include "../util/thread_map.h"
 #include "../util/tool.h"
 #include "../util/util.h"
+#include "../util/workqueue/workqueue.h"
 #include <linux/atomic.h>
 #include <linux/err.h>
 #include <linux/time64.h>
@@ -208,6 +209,7 @@ static int run_multi_threaded(void)
 	};
 	unsigned int nr_threads_synthesize;
 	int err;
+	char errbuf[BUFSIZ];
 
 	if (max_threads == UINT_MAX)
 		max_threads = sysconf(_SC_NPROCESSORS_ONLN);
@@ -219,10 +221,17 @@ static int run_multi_threaded(void)
 	for (nr_threads_synthesize = min_threads;
 	     nr_threads_synthesize <= max_threads;
 	     nr_threads_synthesize++) {
-		if (nr_threads_synthesize == 1)
+		if (nr_threads_synthesize == 1) {
 			perf_set_singlethreaded();
-		else
+		} else {
+			err = setup_global_workqueue(nr_threads_synthesize);
+			if (err) {
+				create_workqueue_strerror(global_wq, errbuf, sizeof(errbuf));
+				pr_err("setup_global_workqueue: %s\n", errbuf);
+				return err;
+			}
 			perf_set_multithreaded();
+		}
 
 		printf("  Number of synthesis threads: %u\n",
 			nr_threads_synthesize);
@@ -230,6 +239,9 @@ static int run_multi_threaded(void)
 		err = do_run_multi_threaded(&target, nr_threads_synthesize);
 		if (err)
 			return err;
+
+		if (nr_threads_synthesize > 1)
+			teardown_global_workqueue();
 	}
 	perf_set_singlethreaded();
 	return 0;
