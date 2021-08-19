@@ -629,6 +629,15 @@ appended unit character - B/K/M/G
 	The number of threads to run when synthesizing events for existing processes.
 	By default, the number of threads equals 1.
 
+--threads::
+	The number of threads to use for operations which have multithreaded
+	support (synthesize, evlist).
+	Setting this option overrides --num-thread-synthesize.
+	You can selectively disable any of the multithreaded operations through
+	perf-config record.multithreaded-{synthesis,evlist}.
+	By default, the number of threads equals 1.
+	Setting this option without any parameter sets it to the number of online cpus.
+
 ifdef::HAVE_LIBPFM[]
 --pfm-events events::
 Select a PMU event using libpfm4 syntax (see http://perfmon2.sf.net)
