@@ -12,6 +12,8 @@
 #include "../util/parse-events.h"
 #include "internal/threadmap.h"
 #include "internal/cpumap.h"
+#include "../util/util.h"
+#include "../util/workqueue/workqueue.h"
 #include <linux/perf_event.h>
 #include <linux/kernel.h>
 #include <linux/time64.h>
@@ -35,7 +37,8 @@ static struct record_opts opts = {
 		.default_per_cpu = true,
 	},
 	.mmap_flush          = MMAP_FLUSH_DEFAULT,
-	.nr_threads_synthesize = 1,
+	.nr_threads          = 1,
+	.multithreaded_evlist = true,
 	.ctl_fd              = -1,
 	.ctl_fd_ack          = -1,
 };
@@ -51,6 +54,7 @@ static const struct option options[] = {
 	OPT_STRING('t', "tid", &opts.target.tid, "tid", "record events on existing thread id"),
 	OPT_STRING('u', "uid", &opts.target.uid_str, "user", "user to profile"),
 	OPT_BOOLEAN(0, "per-thread", &opts.target.per_thread, "use per-thread mmaps"),
+	OPT_UINTEGER_OPTARG('j', "threads", &opts.nr_threads, UINT_MAX, "Number of threads to use"),
 	OPT_END()
 };
 
@@ -106,18 +110,32 @@ out_delete_evlist:
 
 static int bench__do_evlist_open_close(struct evlist *evlist)
 {
-	char sbuf[STRERR_BUFSIZE];
-	int err = evlist__open(evlist);
+	char sbuf[WORKQUEUE_STRERR_BUFSIZE];
+	int err = -1, ret;
 
+	if (opts.nr_threads > 1) {
+		err = setup_global_workqueue(opts.nr_threads);
+		if (err) {
+			create_workqueue_strerror(global_wq, sbuf, sizeof(sbuf));
+			pr_err("setup_global_workqueue: %s\n", sbuf);
+			return err;
+		}
+		if (evlist->core.all_cpus->nr <= workqueue_nr_threads(global_wq))
+			workqueue_set_affinities_cpu(global_wq, evlist->core.all_cpus);
+
+		perf_set_multithreaded();
+	}
+
+	err = evlist__open(evlist);
 	if (err < 0) {
 		pr_err("evlist__open: %s\n", str_error_r(errno, sbuf, sizeof(sbuf)));
-		return err;
+		goto out;
 	}
 
 	err = evlist__mmap(evlist, opts.mmap_pages);
 	if (err < 0) {
 		pr_err("evlist__mmap: %s\n", str_error_r(errno, sbuf, sizeof(sbuf)));
-		return err;
+		goto out;
 	}
 
 	evlist__enable(evlist);
@@ -125,7 +143,19 @@ static int bench__do_evlist_open_close(struct evlist *evlist)
 	evlist__munmap(evlist);
 	evlist__close(evlist);
 
-	return 0;
+out:
+	if (opts.nr_threads > 1) {
+		ret = teardown_global_workqueue();
+		if (ret) {
+			destroy_workqueue_strerror(err, sbuf, sizeof(sbuf));
+			pr_err("teardown_global_workqueue: %s\n", sbuf);
+			err = ret;
+		}
+
+		perf_set_singlethreaded();
+	}
+
+	return err;
 }
 
 static int bench_evlist_open_close__run(char *evstr)
@@ -143,6 +173,7 @@ static int bench_evlist_open_close__run(char *evstr)
 
 	init_stats(&time_stats);
 
+	printf("  Number of workers:\t%u\n", opts.nr_threads);
 	printf("  Number of cpus:\t%d\n", evlist->core.cpus->nr);
 	printf("  Number of threads:\t%d\n", evlist->core.threads->nr);
 	printf("  Number of events:\t%d (%d fds)\n",
@@ -225,6 +256,9 @@ int bench_evlist_open_close(int argc, const char **argv)
 		usage_with_options(bench_usage, options);
 		exit(EXIT_FAILURE);
 	}
+
+	if (opts.nr_threads == UINT_MAX)
+		opts.nr_threads = sysconf(_SC_NPROCESSORS_ONLN);
 
 	err = target__validate(&opts.target);
 	if (err) {
