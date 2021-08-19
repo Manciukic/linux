@@ -49,6 +49,7 @@
 #include "util/term.h"
 #include "util/intlist.h"
 #include "util/parse-branch-options.h"
+#include "util/workqueue/workqueue.h"
 #include "arch/common.h"
 #include "ui/ui.h"
 
@@ -1767,8 +1768,23 @@ int cmd_top(int argc, const char **argv)
 		opts->no_bpf_event = true;
 	}
 
+	if (top.nr_threads_synthesize == UINT_MAX)
+		top.nr_threads_synthesize = sysconf(_SC_NPROCESSORS_ONLN);
+	if (top.nr_threads_synthesize > 1) {
+		status = setup_global_workqueue(top.nr_threads_synthesize);
+		if (status) {
+			create_workqueue_strerror(global_wq, errbuf, sizeof(errbuf));
+			pr_err("setup_global_workqueue: %s\n", errbuf);
+			goto out_stop_sb_th;
+		}
+	}
+
 	status = __cmd_top(&top);
 
+	if (top.nr_threads_synthesize > 1)
+		teardown_global_workqueue();
+
+out_stop_sb_th:
 	if (!opts->no_bpf_event)
 		evlist__stop_sb_thread(top.sb_evlist);
 
