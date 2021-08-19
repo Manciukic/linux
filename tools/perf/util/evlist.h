@@ -161,6 +161,15 @@ void evlist__mmap_consume(struct evlist *evlist, int idx);
 int evlist__open(struct evlist *evlist);
 void evlist__close(struct evlist *evlist);
 
+struct evlist_open_custom_fallback;
+typedef bool (*evlist_open_custom_fallback_fn)(struct evlist_open_custom_fallback *fallback,
+					struct evlist *evlist, struct evsel *evsel, int err);
+struct evlist_open_custom_fallback {
+	evlist_open_custom_fallback_fn func;
+};
+int evlist__open_custom(struct evlist *evlist, struct evlist_open_custom_fallback *cust_fb);
+
+
 struct callchain_param;
 
 void evlist__set_id_pos(struct evlist *evlist);

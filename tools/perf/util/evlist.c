@@ -1406,15 +1406,20 @@ out:
 	return err;
 }
 
-static int evlist__open_singlethreaded(struct evlist *evlist)
+static int evlist__open_singlethreaded(struct evlist *evlist,
+					struct evlist_open_custom_fallback *cust_fb)
 {
 	struct evsel *evsel;
 	int err;
 
 	evlist__for_each_entry(evlist, evsel) {
+try_again:
 		err = evsel__open(evsel, evsel->core.cpus, evsel->core.threads);
-		if (err < 0)
+		if (err < 0) {
+			if (cust_fb && cust_fb->func(cust_fb, evlist, evsel, err))
+				goto try_again;
 			return err;
+		}
 	}
 
 	return 0;
@@ -1470,7 +1475,8 @@ static void evlist__open_multithreaded_func(struct work_struct *_work)
 	}
 }
 
-static int evlist__open_multithreaded(struct evlist *evlist)
+static int evlist__open_multithreaded(struct evlist *evlist,
+				struct evlist_open_custom_fallback *cust_fb)
 {
 	int cpu, cpuid, cpuidx, thread, err;
 	struct evlist_open_work *works;
@@ -1568,6 +1574,9 @@ retry:
 		if (evsel__detect_missing_features(evsel))
 			goto reprepare;
 
+		if (cust_fb && cust_fb->func(cust_fb, evlist, evsel, err))
+			goto reprepare;
+
 		// no fallback worked, return the error
 		goto out;
 	}
@@ -1580,7 +1589,8 @@ out:
 	return err;
 }
 
-int evlist__open(struct evlist *evlist)
+int evlist__open_custom(struct evlist *evlist,
+			struct evlist_open_custom_fallback *cust_fb)
 {
 	int err;
 
@@ -1597,9 +1607,9 @@ int evlist__open(struct evlist *evlist)
 	evlist__update_id_pos(evlist);
 
 	if (perf_singlethreaded)
-		err = evlist__open_singlethreaded(evlist);
+		err = evlist__open_singlethreaded(evlist, cust_fb);
 	else
-		err = evlist__open_multithreaded(evlist);
+		err = evlist__open_multithreaded(evlist, cust_fb);
 
 	if (err)
 		goto out_err;
@@ -1609,6 +1619,11 @@ out_err:
 	evlist__close(evlist);
 	errno = -err;
 	return err;
+}
+
+int evlist__open(struct evlist *evlist)
+{
+	return evlist__open_custom(evlist, NULL);
 }
 
 int evlist__prepare_workload(struct evlist *evlist, struct target *target, const char *argv[],
