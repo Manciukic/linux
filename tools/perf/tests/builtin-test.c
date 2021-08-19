@@ -365,6 +365,15 @@ static struct test generic_tests[] = {
 		.func = test__dlfilter,
 	},
 	{
+		.desc = "Test workqueue lib",
+		.func = test__workqueue,
+		.subtest = {
+			.skip_if_fail	= false,
+			.get_nr		= test__workqueue_subtest_get_nr,
+			.get_desc	= test__workqueue_subtest_get_desc,
+		}
+	},
+	{
 		.func = NULL,
 	},
 };
